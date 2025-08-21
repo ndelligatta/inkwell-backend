@@ -1,0 +1,37 @@
+# Railway configuration for auto-deploy
+[build]
+builder = "nixpacks"
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on-failure"
+restartPolicyMaxRetries = 10
+
+# Environment variable schema (for Railway UI)
+[[envs]]
+name = "ADMIN_PRIVATE_KEY"
+desc = "Admin wallet private key for fee claiming"
+
+[[envs]]
+name = "HELIUS_API_KEY"
+desc = "Helius RPC API key"
+
+[[envs]]
+name = "SUPABASE_URL"
+desc = "Supabase project URL"
+
+[[envs]]
+name = "SUPABASE_ANON_KEY"
+desc = "Supabase anonymous key"
+
+[[envs]]
+name = "DBC_CONFIG_PUBKEY"
+desc = "DBC configuration public key (use D21YtyrW79hiGuVrNGNeiuDsZpNyVqM9QJhiHEvsPcE4 for production)"
+default = "D21YtyrW79hiGuVrNGNeiuDsZpNyVqM9QJhiHEvsPcE4"
+
+[[envs]]
+name = "PORT"
+desc = "Server port (Railway auto-assigns)"

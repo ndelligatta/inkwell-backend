@@ -1,0 +1,222 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+// Use the improved version with better error handling
+const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenLauncherImproved');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// CORS configuration - allow all origins for now, tighten in production if needed
+const corsOptions = {
+  origin: '*', // Allow all origins
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+// Middleware
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Configure multer for file uploads (in memory)
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 2 * 1024 * 1024 } // 2MB limit
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Inkwell backend is running' });
+});
+
+// Main token launch endpoint
+app.post('/api/launch-token', upload.single('image'), async (req, res) => {
+  try {
+    const { 
+      name, 
+      symbol, 
+      description, 
+      website, 
+      twitter, 
+      initialBuyAmount,
+      userId,
+      userPrivateKey // Dev wallet private key
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !symbol || !userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: name, symbol, and userId are required'
+      });
+    }
+
+    // Get user's dev wallet if not provided
+    let privateKey = userPrivateKey;
+    if (!privateKey) {
+      privateKey = await getUserDevWallet(userId);
+      if (!privateKey) {
+        return res.status(400).json({
+          success: false,
+          error: 'User dev wallet not found. Please generate a dev wallet first.'
+        });
+      }
+    }
+
+    // Prepare metadata
+    const metadata = {
+      name: name.trim(),
+      symbol: symbol.trim(),
+      description: description?.trim() || '',
+      website: website?.trim(),
+      twitter: twitter?.trim(),
+      initialBuyAmount: parseFloat(initialBuyAmount) || 0.01
+    };
+
+    // Handle image upload if provided
+    if (req.file) {
+      // Convert file buffer to base64
+      metadata.image = req.file.buffer;
+      metadata.imageType = req.file.mimetype;
+    } else if (req.body.imageBase64) {
+      // Handle base64 image from request body
+      metadata.image = req.body.imageBase64;
+      metadata.imageType = req.body.imageType || 'image/png';
+    }
+
+    // Launch token
+    const result = await launchTokenDBC(metadata, userId, privateKey);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error in /api/launch-token:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// Alternative endpoint for launching with metadata passed directly
+app.post('/api/launch-token-json', async (req, res) => {
+  try {
+    const { 
+      metadata,
+      userId,
+      userPrivateKey // Dev wallet private key
+    } = req.body;
+
+    // Validate required fields
+    if (!metadata?.name || !metadata?.symbol || !userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: metadata.name, metadata.symbol, and userId are required'
+      });
+    }
+
+    // Get user's dev wallet if not provided
+    let privateKey = userPrivateKey;
+    if (!privateKey) {
+      privateKey = await getUserDevWallet(userId);
+      if (!privateKey) {
+        return res.status(400).json({
+          success: false,
+          error: 'User dev wallet not found. Please generate a dev wallet first.'
+        });
+      }
+    }
+
+    // Launch token
+    const result = await launchTokenDBC(metadata, userId, privateKey);
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error in /api/launch-token-json:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// Get user's dev wallet endpoint
+app.get('/api/dev-wallet/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const privateKey = await getUserDevWallet(userId);
+    
+    if (privateKey) {
+      // Only return public key for security
+      const { Keypair } = require('@solana/web3.js');
+      const bs58 = require('bs58');
+      
+      let publicKey;
+      try {
+        const secretKey = Buffer.from(privateKey, 'base64');
+        const keypair = Keypair.fromSecretKey(secretKey);
+        publicKey = keypair.publicKey.toString();
+      } catch (e) {
+        try {
+          const keypair = Keypair.fromSecretKey(bs58.decode(privateKey));
+          publicKey = keypair.publicKey.toString();
+        } catch (e2) {
+          const keyArray = JSON.parse(privateKey);
+          const keypair = Keypair.fromSecretKey(new Uint8Array(keyArray));
+          publicKey = keypair.publicKey.toString();
+        }
+      }
+      
+      res.json({
+        success: true,
+        publicKey,
+        hasDevWallet: true
+      });
+    } else {
+      res.json({
+        success: false,
+        hasDevWallet: false,
+        error: 'Dev wallet not found for user'
+      });
+    }
+  } catch (error) {
+    console.error('Error getting dev wallet:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    success: false,
+    error: 'Something went wrong!'
+  });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`Inkwell backend server running on port ${PORT}`);
+  console.log(`Config address: ${process.env.DBC_CONFIG_PUBKEY}`);
+  console.log(`RPC endpoint: https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY?.substring(0, 8)}...`);
+});
+
+module.exports = app;
