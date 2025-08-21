@@ -194,8 +194,8 @@ async function uploadMetadata(metadata, mintAddress) {
         }
         
         // Validate file size
-        if (fileBuffer.length > 2 * 1024 * 1024) {
-          throw new Error('Image file too large. Maximum size is 2MB.');
+        if (fileBuffer.length > 10 * 1024 * 1024) {
+          throw new Error('Image file too large. Maximum size is 10MB.');
         }
         
         // Upload to Supabase storage with retry
