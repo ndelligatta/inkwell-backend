@@ -13,11 +13,14 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.error('Missing required environment variables: SUPABASE_URL and SUPABASE_ANON_KEY');
-  console.error('Current env vars:', Object.keys(process.env).filter(k => !k.startsWith('npm_')));
+  console.error('CRITICAL ERROR: Missing required environment variables');
+  console.error('SUPABASE_URL:', SUPABASE_URL ? 'SET' : 'MISSING');
+  console.error('SUPABASE_ANON_KEY:', SUPABASE_ANON_KEY ? 'SET' : 'MISSING');
+  console.error('All env vars:', Object.keys(process.env).filter(k => !k.startsWith('npm_')).join(', '));
+  throw new Error('Missing required environment variables: SUPABASE_URL and SUPABASE_ANON_KEY');
 }
 
-const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
+const supabase = createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   {
@@ -26,7 +29,7 @@ const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
       autoRefreshToken: false
     }
   }
-) : null;
+);
 
 // Helius RPC endpoint with fallback
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
@@ -194,6 +197,10 @@ async function uploadMetadata(metadata, mintAddress) {
         }
         
         // Upload to Supabase storage with retry
+        if (!supabase) {
+          throw new Error('Supabase client not initialized. Check environment variables.');
+        }
+        
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('post-media')
           .upload(filePath, fileBuffer, {

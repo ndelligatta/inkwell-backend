@@ -1,8 +1,18 @@
+// CRITICAL: Load environment variables FIRST before any other imports
 require('dotenv').config();
+
+// Log environment variables to debug
+console.log('Environment variables loaded:');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'SET' : 'NOT SET');
+console.log('SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? 'SET (hidden)' : 'NOT SET');
+console.log('DBC_CONFIG_PUBKEY:', process.env.DBC_CONFIG_PUBKEY || 'NOT SET');
+console.log('PORT:', process.env.PORT || '3001');
+
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-// Use the improved version with better error handling
+
+// Import AFTER dotenv is loaded
 const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenLauncherImproved');
 
 const app = express();
