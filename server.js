@@ -12,9 +12,8 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 
-// Import AFTER dotenv is loaded - use the service role version
-const { launchTokenDBC, getUserDevWallet } = require('./tokenLauncherService');
-const { validateMetadata } = require('./tokenLauncherImproved');
+// Import AFTER dotenv is loaded
+const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenLauncherImproved');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
