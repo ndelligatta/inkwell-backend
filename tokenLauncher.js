@@ -9,16 +9,19 @@ const { createClient } = require('@supabase/supabase-js');
 const NATIVE_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 
 // Initialize Supabase client without auth persistence (server-side)
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY,
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
   {
     auth: {
       persistSession: false,
       autoRefreshToken: false
     }
   }
-);
+) : null;
 
 // Helius RPC endpoint
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
