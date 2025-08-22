@@ -103,7 +103,7 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
     const result = await launchTokenDBC(metadata, userId, privateKey);
 
     if (result.success) {
-      res.json(result);
+      res.status(200).json(result);
     } else {
       res.status(500).json(result);
     }
@@ -150,7 +150,7 @@ app.post('/api/launch-token-json', async (req, res) => {
     const result = await launchTokenDBC(metadata, userId, privateKey);
 
     if (result.success) {
-      res.json(result);
+      res.status(200).json(result);
     } else {
       res.status(500).json(result);
     }
