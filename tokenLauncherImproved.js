@@ -609,6 +609,8 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
             token_symbol: metadata.symbol,
             token_name: metadata.name,
             token_mint: baseMintKP.publicKey.toString(),
+            pool_address: poolAddress, // Add pool address
+            config_address: INKWELL_CONFIG_ADDRESS.toString(), // Add config address
             market_cap: 4200.00, // Default market cap
             fees_generated: 0.00
           });

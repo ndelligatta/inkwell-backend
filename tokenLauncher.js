@@ -319,6 +319,54 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       }
     }
     
+    // ONLY NOW that we have a successful launch, insert into user_posts table
+    try {
+      console.log('Inserting token launch into user_posts table...');
+      
+      // Get user details for the post
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('wallet_address, screen_name, profile_picture_url')
+        .eq('id', userId)
+        .single();
+      
+      if (userError) {
+        console.error('Failed to fetch user data:', userError);
+      } else {
+        // Create the post content
+        const postContent = `🚀 Just launched ${metadata.name} ($${metadata.symbol})!\n\n${metadata.description || ''}${metadata.website ? '\n\n🌐 ' + metadata.website : ''}${metadata.twitter ? '\n\n🐦 ' + metadata.twitter : ''}`;
+        
+        // Insert into user_posts
+        const { error: postError } = await supabase
+          .from('user_posts')
+          .insert({
+            user_id: userId,
+            wallet_address: userData.wallet_address || userKeypair.publicKey.toString(),
+            screen_name: userData.screen_name || 'Anonymous',
+            profile_picture_url: userData.profile_picture_url,
+            content: postContent,
+            media_url: metadataUri, // Using the metadata URL as media
+            media_type: 'image',
+            token_symbol: metadata.symbol,
+            token_name: metadata.name,
+            token_mint: baseMintKP.publicKey.toString(),
+            pool_address: poolAddress, // Add pool address
+            config_address: INKWELL_CONFIG_ADDRESS.toString(), // Add config address
+            market_cap: 4200.00, // Default market cap
+            fees_generated: 0.00
+          });
+        
+        if (postError) {
+          console.error('Failed to insert into user_posts:', postError);
+        } else {
+          console.log('Successfully inserted token launch into user_posts');
+        }
+      }
+    } catch (postError) {
+      console.error('Error inserting into user_posts (non-critical):', postError);
+      // Don't fail the token launch if post creation fails
+    }
+    
     return {
       success: true,
       mintAddress: baseMintKP.publicKey.toString(),
