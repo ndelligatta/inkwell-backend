@@ -26,15 +26,14 @@ const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 // Admin wallet keys from environment
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
 const ADMIN_PUBLIC_KEY = process.env.ADMIN_PUBLIC_KEY || "KAQmut31iGrghKrnaaJbv7FS87ez6JYkDrVPgLDjXnk";
-const FEE_RECEIVER_PRIVATE_KEY = process.env.FEE_RECEIVER_PRIVATE_KEY;
 
 // Config address mapping
 const CONFIG_ADDRESS = "FpBnATp3c4i3sVo35u6zyZVpnUEDE6RmVsEofEK1YAMU";
 
-if (!ADMIN_PRIVATE_KEY || !FEE_RECEIVER_PRIVATE_KEY) {
-  console.error('ERROR: Missing required environment variables');
-  console.error('Required: ADMIN_PRIVATE_KEY, FEE_RECEIVER_PRIVATE_KEY');
-  throw new Error('Missing required fee claiming keys');
+if (!ADMIN_PRIVATE_KEY) {
+  console.error('ERROR: Missing required environment variable');
+  console.error('Required: ADMIN_PRIVATE_KEY');
+  throw new Error('Missing admin private key for fee claiming');
 }
 
 // Get fee metrics for a pool
@@ -93,11 +92,9 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     
     // Create keypairs
     const adminKeypair = Keypair.fromSecretKey(bs58.decode(ADMIN_PRIVATE_KEY));
-    const receiverKeypair = Keypair.fromSecretKey(bs58.decode(FEE_RECEIVER_PRIVATE_KEY));
     const poolPubkey = new PublicKey(poolAddress);
     
-    console.log('Admin wallet (fee claimer):', adminKeypair.publicKey.toString());
-    console.log('Receiver wallet:', receiverKeypair.publicKey.toString());
+    console.log('Admin wallet (fee claimer & payer):', adminKeypair.publicKey.toString());
     
     // Verify admin wallet is correct
     if (adminKeypair.publicKey.toString() !== ADMIN_PUBLIC_KEY) {
@@ -119,47 +116,36 @@ async function claimPoolFees(poolAddress, poolData = {}) {
       throw new Error('No fees available to claim');
     }
     
-    // Check wallet balances
-    console.log('\nChecking wallet states:');
+    // Check admin wallet balance
+    console.log('\nChecking wallet state:');
     
     const adminAccountInfo = await connection.getAccountInfo(adminKeypair.publicKey);
     console.log('Admin wallet:');
     console.log('- Balance:', adminAccountInfo ? (adminAccountInfo.lamports / LAMPORTS_PER_SOL).toFixed(6) + ' SOL' : 'Not found');
     console.log('- Data length:', adminAccountInfo?.data.length || 0, 'bytes');
     
-    const receiverAccountInfo = await connection.getAccountInfo(receiverKeypair.publicKey);
-    console.log('Receiver wallet:');
-    console.log('- Balance:', receiverAccountInfo ? (receiverAccountInfo.lamports / LAMPORTS_PER_SOL).toFixed(6) + ' SOL' : 'Not found');
-    console.log('- Data length:', receiverAccountInfo?.data.length || 0, 'bytes');
-    
-    if (!receiverAccountInfo || receiverAccountInfo.lamports < 0.01 * LAMPORTS_PER_SOL) {
-      throw new Error('Receiver wallet needs at least 0.01 SOL to pay for transaction fees');
-    }
-    
-    if (receiverAccountInfo && receiverAccountInfo.data.length > 0) {
-      console.warn('WARNING: Receiver wallet has data! This may cause transfer errors.');
+    if (!adminAccountInfo || adminAccountInfo.lamports < 0.01 * LAMPORTS_PER_SOL) {
+      throw new Error('Admin wallet needs at least 0.01 SOL to pay for transaction fees');
     }
     
     // Create claim transaction
     console.log('\nCreating claim transaction...');
     
-    // Use claimPartnerTradingFee2 since admin wallet has program data
-    // This method allows receiver to act as payer
-    const claimTx = await dbcClient.partner.claimPartnerTradingFee2({
+    // Use claimPartnerTradingFee - direct claim since new admin wallet has no data
+    const claimTx = await dbcClient.partner.claimPartnerTradingFee({
       feeClaimer: adminKeypair.publicKey,
       pool: poolPubkey,
       maxBaseAmount: feeMetrics.current.partnerBaseFee,
       maxQuoteAmount: feeMetrics.current.partnerQuoteFee,
-      payer: receiverKeypair.publicKey, // Receiver acts as payer
-      receiver: receiverKeypair.publicKey,
+      payer: adminKeypair.publicKey
     });
     
     // Sign and send transaction
     console.log('Signing transaction...');
-    claimTx.feePayer = receiverKeypair.publicKey;
+    claimTx.feePayer = adminKeypair.publicKey;
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
     claimTx.recentBlockhash = blockhash;
-    claimTx.sign(receiverKeypair); // Only receiver needs to sign for claimPartnerTradingFee2
+    claimTx.sign(adminKeypair); // Admin signs as both fee claimer and payer
     
     console.log('Sending transaction...');
     const signature = await connection.sendRawTransaction(
@@ -188,9 +174,9 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     console.log('✅ Transaction confirmed!');
     console.log('View on Solscan:', `https://solscan.io/tx/${signature}`);
     
-    // Verify receiver balance after claim
-    const receiverBalanceAfter = await connection.getBalance(receiverKeypair.publicKey);
-    console.log('Receiver balance after claim:', (receiverBalanceAfter / LAMPORTS_PER_SOL).toFixed(6), 'SOL');
+    // Verify admin balance after claim
+    const adminBalanceAfter = await connection.getBalance(adminKeypair.publicKey);
+    console.log('Admin balance after claim:', (adminBalanceAfter / LAMPORTS_PER_SOL).toFixed(6), 'SOL');
     
     // Update database if Supabase is available
     if (supabase && poolData.poolAddress) {
@@ -221,7 +207,7 @@ async function claimPoolFees(poolAddress, poolData = {}) {
       signature,
       claimedAmount: availableFeesSOL,
       solscanUrl: `https://solscan.io/tx/${signature}`,
-      receiverWallet: receiverKeypair.publicKey.toString()
+      receiverWallet: adminKeypair.publicKey.toString()
     };
     
   } catch (error) {
