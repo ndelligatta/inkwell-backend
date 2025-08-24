@@ -16,7 +16,7 @@ const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenL
 const { createInkwellConfig } = require('./createConfig');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
-const { setupPoolWebhook, processWebhookEvent, listWebhooks } = require('./heliusWebhookHandler');
+const { setupPoolWebhook, processWebhookEvent, listWebhooks, syncAllTimeFees, getAllTimeFees } = require('./heliusWebhookHandlerV2');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -603,6 +603,51 @@ app.get('/api/webhooks/list', async (req, res) => {
   }
 });
 
+// Sync all-time fees for all pools
+app.post('/api/fees/sync-all', async (req, res) => {
+  try {
+    console.log('====== SYNCING ALL-TIME FEES ======');
+    
+    await syncAllTimeFees();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Fee sync completed'
+    });
+    
+  } catch (error) {
+    console.error('Error syncing fees:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to sync fees'
+    });
+  }
+});
+
+// Get all-time fees for specific pool
+app.get('/api/fees/all-time/:poolAddress', async (req, res) => {
+  try {
+    const { poolAddress } = req.params;
+    
+    console.log(`Getting all-time fees for pool: ${poolAddress}`);
+    
+    const fees = await getAllTimeFees(poolAddress);
+    
+    res.status(200).json({
+      success: true,
+      poolAddress,
+      allTimeFees: fees
+    });
+    
+  } catch (error) {
+    console.error('Error getting all-time fees:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get fees'
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -617,6 +662,29 @@ app.listen(PORT, () => {
   console.log(`Inkwell backend server running on port ${PORT}`);
   console.log(`Config address: ${process.env.DBC_CONFIG_PUBKEY}`);
   console.log(`RPC endpoint: https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY?.substring(0, 8)}...`);
+  
+  // Start periodic fee sync (every 5 minutes)
+  console.log('Starting periodic fee sync job...');
+  setInterval(async () => {
+    console.log('[CRON] Running fee sync...');
+    try {
+      await syncAllTimeFees();
+      console.log('[CRON] Fee sync completed');
+    } catch (error) {
+      console.error('[CRON] Fee sync error:', error);
+    }
+  }, 5 * 60 * 1000); // 5 minutes
+  
+  // Run initial sync after 10 seconds
+  setTimeout(async () => {
+    console.log('[STARTUP] Running initial fee sync...');
+    try {
+      await syncAllTimeFees();
+      console.log('[STARTUP] Initial fee sync completed');
+    } catch (error) {
+      console.error('[STARTUP] Initial fee sync error:', error);
+    }
+  }, 10000);
 });
 
 module.exports = app;
