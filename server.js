@@ -15,6 +15,7 @@ const multer = require('multer');
 // Import AFTER dotenv is loaded
 const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenLauncherImproved');
 const { createInkwellConfig } = require('./createConfig');
+const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -244,6 +245,74 @@ app.post('/api/create-config', async (req, res) => {
       success: false,
       error: error.message || 'Internal server error',
       details: error.toString()
+    });
+  }
+});
+
+// Claim platform fees endpoint
+app.post('/api/claim-platform-fees', async (req, res) => {
+  try {
+    console.log('Claiming platform fees...');
+    
+    // This endpoint should be protected
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.ADMIN_AUTH_TOKEN || 'admin-secret'}`) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized. Admin authentication required.'
+      });
+    }
+    
+    const { poolAddress } = req.body;
+    
+    if (!poolAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'Pool address is required'
+      });
+    }
+    
+    // Claim fees from the specified pool
+    const result = await claimPoolFees(poolAddress);
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+    
+  } catch (error) {
+    console.error('Error in /api/claim-platform-fees:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error',
+      details: error.toString()
+    });
+  }
+});
+
+// Get pool fee metrics endpoint
+app.get('/api/pool-fees/:poolAddress', async (req, res) => {
+  try {
+    const { poolAddress } = req.params;
+    
+    if (!poolAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'Pool address is required'
+      });
+    }
+    
+    // Get fee metrics for the pool
+    const result = await getPoolFeeMetrics(poolAddress);
+    
+    res.status(200).json(result);
+    
+  } catch (error) {
+    console.error('Error in /api/pool-fees:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
     });
   }
 });
