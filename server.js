@@ -242,23 +242,34 @@ app.get('/api/dev-wallet/:userId', async (req, res) => {
   }
 });
 
-// Create new DBC config endpoint
+// Create new DBC config endpoint - protected with same auth as fee claiming
 app.post('/api/create-config', async (req, res) => {
   try {
-    console.log('Creating new DBC config...');
+    console.log('====== CREATE CONFIG ENDPOINT ======');
+    console.log('Request from:', req.headers.origin || 'Unknown origin');
+    console.log('Authorization:', req.headers.authorization ? 'Present' : 'Missing');
     
-    // This endpoint should be protected in production
-    // For now, we'll check for a simple auth header
+    // Use same authentication as fee claiming endpoint
     const authHeader = req.headers.authorization;
     if (!authHeader || authHeader !== `Bearer ${process.env.ADMIN_AUTH_TOKEN || 'admin-secret'}`) {
+      console.error('Unauthorized request - missing or invalid auth token');
       return res.status(401).json({
         success: false,
         error: 'Unauthorized. Admin authentication required.'
       });
     }
     
-    // Create the config
+    console.log('Creating new DBC config...');
+    
+    // Create the config using the same admin wallet as fee claiming
     const result = await createInkwellConfig();
+    
+    console.log('Config creation result:', result.success ? 'SUCCESS' : 'FAILED');
+    if (!result.success) {
+      console.error('Config creation failed:', result.error);
+    } else {
+      console.log('New config address:', result.configAddress);
+    }
     
     if (result.success) {
       res.status(200).json(result);
@@ -267,7 +278,9 @@ app.post('/api/create-config', async (req, res) => {
     }
     
   } catch (error) {
-    console.error('Error in /api/create-config:', error);
+    console.error('====== ERROR IN CONFIG ENDPOINT ======');
+    console.error('Error:', error);
+    console.error('Stack:', error.stack);
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error',
