@@ -263,7 +263,7 @@ app.post('/api/claim-platform-fees', async (req, res) => {
       });
     }
     
-    const { poolAddress } = req.body;
+    const { poolAddress, poolData } = req.body;
     
     if (!poolAddress) {
       return res.status(400).json({
@@ -273,7 +273,7 @@ app.post('/api/claim-platform-fees', async (req, res) => {
     }
     
     // Claim fees from the specified pool
-    const result = await claimPoolFees(poolAddress);
+    const result = await claimPoolFees(poolAddress, poolData || {});
     
     if (result.success) {
       res.status(200).json(result);

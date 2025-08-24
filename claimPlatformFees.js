@@ -85,8 +85,8 @@ async function claimPoolFees(poolAddress, poolData = {}) {
   try {
     console.log('====== CLAIM PLATFORM FEES START ======');
     console.log('Pool:', poolAddress);
-    console.log('Token:', poolData.symbol || 'Unknown');
-    console.log('Config:', CONFIG_ADDRESS);
+    console.log('Token:', poolData.metadata?.symbol || poolData.symbol || 'Unknown');
+    console.log('Config:', poolData.config_address || CONFIG_ADDRESS);
     
     // Initialize connection and client
     const connection = new Connection(RPC_URL, 'confirmed');
