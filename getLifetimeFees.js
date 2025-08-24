@@ -8,15 +8,15 @@ const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
 // Initialize Supabase
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 console.log('🔧 Supabase initialization:');
 console.log(`- URL: ${SUPABASE_URL ? 'Found' : '❌ MISSING'}`);
-console.log(`- Anon Key: ${SUPABASE_ANON_KEY ? 'Found' : '❌ MISSING'}`);
+console.log(`- Service Role Key: ${SUPABASE_SERVICE_ROLE_KEY ? 'Found' : '❌ MISSING'}`);
 
-const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
+const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY ? createClient(
   SUPABASE_URL,
-  SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_KEY,
   {
     auth: {
       persistSession: false,
@@ -27,6 +27,7 @@ const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
 
 if (!supabase) {
   console.error('❌ SUPABASE CLIENT NOT INITIALIZED! Check environment variables.');
+  console.error('Make sure SUPABASE_SERVICE_ROLE_KEY is set in Railway!');
 }
 
 // Get lifetime fees for a pool
@@ -103,12 +104,18 @@ async function updateAllPoolsLifetimeFees() {
       .select('id, pool_address')
       .not('pool_address', 'is', null);
       
-    if (error || !posts) {
-      console.error('Error fetching pools:', error);
+    if (error) {
+      console.error('❌ Error fetching pools:', error);
       return;
     }
     
-    console.log(`Updating lifetime fees for ${posts.length} pools...`);
+    if (!posts || posts.length === 0) {
+      console.error('❌ No posts with pool addresses found');
+      return;
+    }
+    
+    console.log(`\n🔍 Found ${posts.length} pools to update:`);
+    posts.forEach(p => console.log(`- ${p.pool_address} (ID: ${p.id})`));
     
     for (const post of posts) {
       const result = await getLifetimeFees(post.pool_address);
