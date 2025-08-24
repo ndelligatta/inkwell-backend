@@ -596,7 +596,7 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
         const postContent = `🚀 Just launched ${metadata.name} ($${metadata.symbol})!\n\n${metadata.description || ''}${metadata.website ? '\n\n🌐 ' + metadata.website : ''}${metadata.twitter ? '\n\n🐦 ' + metadata.twitter : ''}`;
         
         // Insert into user_posts
-        const { error: postError } = await supabase
+        const { data: postData, error: postError } = await supabase
           .from('user_posts')
           .insert({
             user_id: userId,
@@ -613,12 +613,26 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
             config_address: INKWELL_CONFIG_ADDRESS.toString(), // Add config address
             market_cap: 4200.00, // Default market cap
             fees_generated: 0.00
-          });
+          })
+          .select('id')
+          .single();
         
         if (postError) {
           console.error('Failed to insert into user_posts:', postError);
         } else {
           console.log('Successfully inserted token launch into user_posts');
+          
+          // Set up Helius webhook for real-time fee tracking
+          try {
+            const { setupPoolWebhook } = require('./heliusWebhookHandler');
+            console.log('Setting up Helius webhook for pool:', poolAddress);
+            
+            const webhookResult = await setupPoolWebhook(poolAddress, postData?.id);
+            console.log('Webhook setup successful:', webhookResult.webhookID);
+          } catch (webhookError) {
+            console.error('Failed to setup webhook (non-critical):', webhookError);
+            // Don't fail the launch if webhook setup fails
+          }
         }
       }
     } catch (postError) {

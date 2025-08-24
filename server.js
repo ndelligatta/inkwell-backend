@@ -16,6 +16,7 @@ const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenL
 const { createInkwellConfig } = require('./createConfig');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
+const { setupPoolWebhook, processWebhookEvent, listWebhooks } = require('./heliusWebhookHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -512,6 +513,92 @@ app.get('/api/creator-fees/:poolAddress', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// Helius webhook endpoint for pool events
+app.post('/api/webhooks/helius/pool-events', async (req, res) => {
+  try {
+    console.log('====== HELIUS WEBHOOK RECEIVED ======');
+    
+    // Verify webhook authenticity
+    const authHeader = req.headers['authorization'];
+    const expectedAuth = process.env.WEBHOOK_AUTH_TOKEN || 'inkwell-webhook-secret';
+    
+    if (authHeader !== expectedAuth) {
+      console.error('Unauthorized webhook attempt');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    console.log('Webhook authenticated successfully');
+    console.log('Payload size:', JSON.stringify(req.body).length);
+    
+    // Process the webhook data
+    const result = await processWebhookEvent(req.body);
+    
+    console.log('Webhook processing result:', result);
+    
+    res.status(200).json({ received: true, ...result });
+    
+  } catch (error) {
+    console.error('====== WEBHOOK ERROR ======');
+    console.error('Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// Setup webhook for a pool
+app.post('/api/webhooks/setup', async (req, res) => {
+  try {
+    console.log('Setting up webhook for pool...');
+    
+    const { poolAddress, postId } = req.body;
+    
+    if (!poolAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'Pool address is required'
+      });
+    }
+    
+    const result = await setupPoolWebhook(poolAddress, postId);
+    
+    res.status(200).json({
+      success: true,
+      webhookId: result.webhookID,
+      poolAddress
+    });
+    
+  } catch (error) {
+    console.error('Error setting up webhook:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to setup webhook'
+    });
+  }
+});
+
+// List all active webhooks
+app.get('/api/webhooks/list', async (req, res) => {
+  try {
+    // Verify admin auth
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.ADMIN_AUTH_TOKEN || 'admin-secret'}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    const webhooks = await listWebhooks();
+    res.status(200).json({ success: true, webhooks });
+    
+  } catch (error) {
+    console.error('Error listing webhooks:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to list webhooks'
     });
   }
 });
