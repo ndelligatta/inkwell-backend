@@ -15,6 +15,7 @@ const multer = require('multer');
 const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenLauncherImproved');
 const { createInkwellConfig } = require('./createConfig');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
+const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -408,6 +409,106 @@ app.post('/api/verify-pin', async (req, res) => {
     
   } catch (error) {
     console.error('Error in /api/verify-pin:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// Claim creator fees from a single pool
+app.post('/api/claim-creator-fees', async (req, res) => {
+  try {
+    console.log('====== CLAIM CREATOR FEES ENDPOINT ======');
+    console.log('Request body:', { ...req.body, creatorPrivateKey: req.body.creatorPrivateKey ? 'HIDDEN' : 'NOT PROVIDED' });
+    
+    const { poolAddress, userId, creatorPrivateKey } = req.body;
+    
+    if (!poolAddress || !userId || !creatorPrivateKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Pool address, user ID, and creator private key are required'
+      });
+    }
+    
+    console.log('Starting creator fee claim process...');
+    const result = await claimCreatorFees(poolAddress, creatorPrivateKey, userId);
+    
+    console.log('Claim result:', result.success ? 'SUCCESS' : 'FAILED');
+    if (!result.success) {
+      console.error('Claim failed:', result.error);
+    }
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+    
+  } catch (error) {
+    console.error('====== ERROR IN CREATOR CLAIM ENDPOINT ======');
+    console.error('Error:', error);
+    console.error('Stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error',
+      details: error.toString()
+    });
+  }
+});
+
+// Claim all creator fees for a user
+app.post('/api/claim-all-creator-fees', async (req, res) => {
+  try {
+    console.log('====== CLAIM ALL CREATOR FEES ENDPOINT ======');
+    
+    const { userId, creatorPrivateKey } = req.body;
+    
+    if (!userId || !creatorPrivateKey) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID and creator private key are required'
+      });
+    }
+    
+    console.log('Starting claim all process for user:', userId);
+    const result = await claimAllCreatorFees(userId, creatorPrivateKey);
+    
+    console.log('Claim all result:', result.success ? 'SUCCESS' : 'FAILED');
+    
+    if (result.success || result.poolsProcessed > 0) {
+      res.status(200).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+    
+  } catch (error) {
+    console.error('====== ERROR IN CLAIM ALL ENDPOINT ======');
+    console.error('Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// Check available creator fees for a pool
+app.get('/api/creator-fees/:poolAddress', async (req, res) => {
+  try {
+    const { poolAddress } = req.params;
+    
+    if (!poolAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'Pool address is required'
+      });
+    }
+    
+    const result = await checkAvailableCreatorFees(poolAddress);
+    res.status(200).json(result);
+    
+  } catch (error) {
+    console.error('Error in /api/creator-fees:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
