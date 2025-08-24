@@ -107,7 +107,7 @@ async function updateAllPoolsLifetimeFees() {
       
       if (result.success) {
         // Update database with lifetime fees
-        await supabase
+        const { data, error } = await supabase
           .from('user_posts')
           .update({
             total_fees_generated_all_time: result.lifetimeFees,
@@ -115,7 +115,11 @@ async function updateAllPoolsLifetimeFees() {
           })
           .eq('id', post.id);
           
-        console.log(`Updated ${post.pool_address}: ${result.lifetimeFees} SOL`);
+        if (error) {
+          console.error(`Failed to update database for ${post.pool_address}:`, error);
+        } else {
+          console.log(`✅ Updated ${post.pool_address}: ${result.lifetimeFees} SOL`);
+        }
       }
       
       // Small delay to avoid rate limits

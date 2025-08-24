@@ -517,39 +517,7 @@ app.get('/api/creator-fees/:poolAddress', async (req, res) => {
   }
 });
 
-// Helius webhook endpoint for pool events
-app.post('/api/webhooks/helius/pool-events', async (req, res) => {
-  try {
-    console.log('====== HELIUS WEBHOOK RECEIVED ======');
-    
-    // Verify webhook authenticity
-    const authHeader = req.headers['authorization'];
-    const expectedAuth = process.env.WEBHOOK_AUTH_TOKEN || 'inkwell-webhook-secret';
-    
-    if (authHeader !== expectedAuth) {
-      console.error('Unauthorized webhook attempt');
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    console.log('Webhook authenticated successfully');
-    console.log('Payload size:', JSON.stringify(req.body).length);
-    
-    // Process the webhook data
-    const result = await processWebhookEvent(req.body);
-    
-    console.log('Webhook processing result:', result);
-    
-    res.status(200).json({ received: true, ...result });
-    
-  } catch (error) {
-    console.error('====== WEBHOOK ERROR ======');
-    console.error('Error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Internal server error'
-    });
-  }
-});
+// Webhook endpoint removed - using DBC SDK polling instead
 
 // Setup webhook for a pool
 app.post('/api/webhooks/setup', async (req, res) => {
