@@ -357,6 +357,51 @@ app.get('/api/pool-fees/:poolAddress', async (req, res) => {
   }
 });
 
+// Verify PIN endpoint for admin pages
+app.post('/api/verify-pin', async (req, res) => {
+  try {
+    const { pin } = req.body;
+    
+    if (!pin) {
+      return res.status(400).json({
+        success: false,
+        error: 'PIN is required'
+      });
+    }
+    
+    // Get the PIN from environment variable
+    const correctPin = process.env.four_pin || process.env.FOUR_PIN;
+    
+    if (!correctPin) {
+      console.error('four_pin environment variable not set');
+      return res.status(500).json({
+        success: false,
+        error: 'PIN verification not configured'
+      });
+    }
+    
+    // Verify PIN
+    if (pin === correctPin) {
+      res.status(200).json({
+        success: true,
+        message: 'PIN verified successfully'
+      });
+    } else {
+      res.status(401).json({
+        success: false,
+        error: 'Invalid PIN'
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error in /api/verify-pin:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
