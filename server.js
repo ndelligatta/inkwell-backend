@@ -20,9 +20,23 @@ const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS configuration - allow all origins for now, tighten in production if needed
+// CORS configuration - allow specific origins
 const corsOptions = {
-  origin: '*', // Allow all origins
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'https://blockparty.fun',
+      'https://www.blockparty.fun',
+      'https://inkwell-feed.netlify.app'
+    ];
+    // Allow requests with no origin (like mobile apps or Postman)
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all origins for now
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
