@@ -40,7 +40,7 @@ const FALLBACK_RPC = "https://api.mainnet-beta.solana.com";
 
 // Inkwell config address - 4% fee, 9 decimals, EXACTLY 1B tokens, 20 SOL threshold, FIXED SUPPLY
 const INKWELL_CONFIG_ADDRESS = new PublicKey(
-  process.env.DBC_CONFIG_PUBKEY || "D21YtyrW79hiGuVrNGNeiuDsZpNyVqM9QJhiHEvsPcE4"
+  process.env.DBC_CONFIG_PUBKEY || "FpBnATp3c4i3sVo35u6zyZVpnUEDE6RmVsEofEK1YAMU"
 );
 
 // Validation functions

@@ -2,7 +2,7 @@
 const { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } = require('@solana/web3.js');
 const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 const BN = require('bn.js');
-const bs58 = require('bs58');
+const bs58 = require('bs58').default;
 require('dotenv').config();
 
 // Constants
