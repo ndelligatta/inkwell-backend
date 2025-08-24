@@ -613,47 +613,7 @@ app.get('/api/fees/lifetime/:poolAddress', async (req, res) => {
   }
 });
 
-// Update post with latest fee data
-app.post('/api/fees/update-post', async (req, res) => {
-  try {
-    const { postId, poolAddress, totalFees } = req.body;
-    
-    if (!postId || !poolAddress || totalFees === undefined) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields'
-      });
-    }
-    
-    console.log(`Updating post ${postId} fees: ${totalFees} SOL`);
-    
-    // Update database
-    const { error } = await supabase
-      .from('user_posts')
-      .update({
-        total_fees_generated_all_time: totalFees,
-        last_fee_update_at: new Date().toISOString()
-      })
-      .eq('id', postId)
-      .eq('pool_address', poolAddress);
-      
-    if (error) {
-      throw error;
-    }
-    
-    res.status(200).json({
-      success: true,
-      message: 'Fees updated successfully'
-    });
-    
-  } catch (error) {
-    console.error('Error updating post fees:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to update fees'
-    });
-  }
-});
+// Update post endpoint removed - updates happen in getLifetimeFees.js instead
 
 // Error handling middleware
 app.use((err, req, res, next) => {
