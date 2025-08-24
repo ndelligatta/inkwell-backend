@@ -14,6 +14,7 @@ const multer = require('multer');
 
 // Import AFTER dotenv is loaded
 const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenLauncherImproved');
+const { createInkwellConfig } = require('./createConfig');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -209,6 +210,40 @@ app.get('/api/dev-wallet/:userId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error'
+    });
+  }
+});
+
+// Create new DBC config endpoint
+app.post('/api/create-config', async (req, res) => {
+  try {
+    console.log('Creating new DBC config...');
+    
+    // This endpoint should be protected in production
+    // For now, we'll check for a simple auth header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.ADMIN_AUTH_TOKEN || 'admin-secret'}`) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized. Admin authentication required.'
+      });
+    }
+    
+    // Create the config
+    const result = await createInkwellConfig();
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+    
+  } catch (error) {
+    console.error('Error in /api/create-config:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error',
+      details: error.toString()
     });
   }
 });
