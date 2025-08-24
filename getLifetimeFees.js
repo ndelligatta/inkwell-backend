@@ -2,6 +2,7 @@
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 const { createClient } = require('@supabase/supabase-js');
+const { updateUserLifetimeFees } = require('./updateUserLifetimeFees');
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
 const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
@@ -117,6 +118,9 @@ async function updateAllPoolsLifetimeFees() {
     console.log(`\n🔍 Found ${posts.length} pools to update:`);
     posts.forEach(p => console.log(`- ${p.pool_address} (ID: ${p.id})`));
     
+    // Track which users need lifetime fee updates
+    const updatedUserIds = new Set();
+    
     for (const post of posts) {
       const result = await getLifetimeFees(post.pool_address);
       
@@ -133,7 +137,7 @@ async function updateAllPoolsLifetimeFees() {
             last_fee_update_at: new Date().toISOString()
           })
           .eq('id', post.id)
-          .select();
+          .select('*, user_id');
           
         if (error) {
           console.error(`❌ DATABASE UPDATE FAILED for ${post.pool_address}:`, error);
@@ -143,6 +147,10 @@ async function updateAllPoolsLifetimeFees() {
           console.log(`Returned data:`, data);
           if (data && data.length > 0) {
             console.log(`Verified DB value: ${data[0].total_fees_generated_all_time} SOL`);
+            // Track user for lifetime fee update
+            if (data[0].user_id) {
+              updatedUserIds.add(data[0].user_id);
+            }
           }
         }
       }
@@ -151,7 +159,13 @@ async function updateAllPoolsLifetimeFees() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    console.log('Finished updating all pools');
+    // Update lifetime fees for affected users
+    console.log(`\n👥 Updating lifetime fees for ${updatedUserIds.size} users...`);
+    for (const userId of updatedUserIds) {
+      await updateUserLifetimeFees(userId);
+    }
+    
+    console.log('Finished updating all pools and users');
   } catch (error) {
     console.error('Error updating all pools:', error);
   }

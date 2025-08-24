@@ -17,6 +17,7 @@ const { createInkwellConfig } = require('./createConfig');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
 const { getLifetimeFees, updateAllPoolsLifetimeFees } = require('./getLifetimeFees');
+const { updateUserLifetimeFees, updateAllUsersLifetimeFees } = require('./updateUserLifetimeFees');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
