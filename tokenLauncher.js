@@ -29,7 +29,7 @@ const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
 // Inkwell config address - 4% fee, 9 decimals, EXACTLY 1B tokens, 20 SOL threshold, FIXED SUPPLY
 const INKWELL_CONFIG_ADDRESS = new PublicKey(
-  process.env.DBC_CONFIG_PUBKEY || "FpBnATp3c4i3sVo35u6zyZVpnUEDE6RmVsEofEK1YAMU"
+  "FpBnATp3c4i3sVo35u6zyZVpnUEDE6RmVsEofEK1YAMU"
 );
 
 // Helper function to upload metadata following Metaplex standard
