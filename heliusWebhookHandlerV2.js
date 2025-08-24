@@ -251,25 +251,47 @@ async function updatePoolFees(poolAddress, feeAmount, signature) {
 // Get all-time fees from Meteora API
 async function getAllTimeFees(poolAddress) {
   try {
-    // Use the same endpoint as the frontend
-    const response = await axios.get(
+    // Try multiple endpoints to get pool data with accumulated fees
+    const endpoints = [
+      `https://damm-api.meteora.ag/pools/${poolAddress}`,
+      `https://dammv2-api.meteora.ag/pools/${poolAddress}`,
+      // Fallback to the old endpoint that returns current fees
       `https://meteora-ozkfrax2c-meteora-ag.vercel.app/pool/${poolAddress}/fee-metrics`
-    );
+    ];
     
-    if (response.data) {
-      const metrics = response.data;
-      // Calculate total fees (creator + platform)
-      const creatorFees = (parseFloat(metrics.current?.creatorBaseFee || 0) + parseFloat(metrics.current?.creatorQuoteFee || 0)) / 1e9;
-      const platformFees = (parseFloat(metrics.current?.platformBaseFee || 0) + parseFloat(metrics.current?.platformQuoteFee || 0)) / 1e9;
-      const totalFees = creatorFees + platformFees;
-      
-      console.log(`All-time fees for ${poolAddress}:`);
-      console.log(`- Creator: ${creatorFees} SOL`);
-      console.log(`- Platform: ${platformFees} SOL`);
-      console.log(`- Total: ${totalFees} SOL`);
-      
-      return totalFees;
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`Trying endpoint: ${endpoint}`);
+        const response = await axios.get(endpoint);
+        
+        if (response.data) {
+          // Check for accumulated_fee_volume (lifetime total)
+          if (response.data.accumulated_fee_volume !== undefined) {
+            const lifetimeFees = parseFloat(response.data.accumulated_fee_volume);
+            console.log(`✅ LIFETIME FEES for ${poolAddress}: ${lifetimeFees} SOL`);
+            console.log(`- From accumulated_fee_volume field`);
+            return lifetimeFees;
+          }
+          
+          // Fallback to current fees if no accumulated data
+          if (response.data.current) {
+            const metrics = response.data;
+            const creatorFees = (parseFloat(metrics.current?.creatorBaseFee || 0) + parseFloat(metrics.current?.creatorQuoteFee || 0)) / 1e9;
+            const platformFees = (parseFloat(metrics.current?.platformBaseFee || 0) + parseFloat(metrics.current?.platformQuoteFee || 0)) / 1e9;
+            const totalFees = creatorFees + platformFees;
+            
+            console.log(`Current fees for ${poolAddress}: ${totalFees} SOL`);
+            console.log(`(Note: This is current unclaimed, not lifetime total)`);
+            
+            return totalFees;
+          }
+        }
+      } catch (err) {
+        console.log(`Failed to fetch from ${endpoint}: ${err.message}`);
+        continue;
+      }
     }
+    
   } catch (error) {
     console.error(`Error fetching all-time fees for ${poolAddress}:`, error.message);
   }
