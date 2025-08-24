@@ -42,19 +42,6 @@ async function setupPoolWebhook(poolAddress, postId) {
     );
     
     console.log('Webhook created successfully:', response.data);
-    
-    // Store webhook info in database
-    if (supabase) {
-      await supabase
-        .from('pool_webhooks')
-        .insert({
-          pool_address: poolAddress,
-          post_id: postId,
-          webhook_id: response.data.webhookID,
-          status: 'active'
-        });
-    }
-      
     return response.data;
   } catch (error) {
     console.error('Error creating webhook:', error.response?.data || error);
@@ -133,27 +120,35 @@ async function processSwapEvent(transaction) {
     
     // Update database
     if (supabase) {
-      // Call the SQL function to update fees atomically
-      const { data, error } = await supabase.rpc('update_pool_fees', {
-        p_pool_address: poolAddress,
-        p_fee_amount_sol: feeAmount,
-        p_transaction_signature: transaction.signature
-      });
-      
-      if (error) {
-        console.error('Database update error:', error);
-      } else {
-        console.log('Database updated successfully');
+      // First get the current total
+      const { data: currentPost, error: fetchError } = await supabase
+        .from('user_posts')
+        .select('total_fees_generated_all_time')
+        .eq('pool_address', poolAddress)
+        .single();
+        
+      if (fetchError) {
+        console.error('Error fetching current fees:', fetchError);
+        return;
       }
       
-      // Also update the total directly (backup method)
-      await supabase
+      const currentTotal = parseFloat(currentPost?.total_fees_generated_all_time || '0');
+      const newTotal = currentTotal + feeAmount;
+      
+      // Update with new total
+      const { error: updateError } = await supabase
         .from('user_posts')
         .update({
-          total_fees_generated_all_time: supabase.raw('total_fees_generated_all_time + ?', [feeAmount]),
+          total_fees_generated_all_time: newTotal,
           last_fee_update_at: new Date().toISOString()
         })
         .eq('pool_address', poolAddress);
+        
+      if (updateError) {
+        console.error('Database update error:', updateError);
+      } else {
+        console.log(`Database updated: ${poolAddress} - Total fees: ${newTotal} SOL`);
+      }
     }
     
     return { poolAddress, feeAmount, signature: transaction.signature };
