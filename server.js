@@ -45,6 +45,20 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
+
+// Additional CORS headers for all routes
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -316,14 +330,6 @@ app.post('/api/claim-platform-fees', async (req, res) => {
       details: error.toString()
     });
   }
-});
-
-// Handle preflight requests for claim endpoint
-app.options('/api/claim-platform-fees', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.sendStatus(200);
 });
 
 // Get pool fee metrics endpoint
