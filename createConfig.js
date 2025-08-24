@@ -3,7 +3,6 @@ const { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } = require('@solana/we
 const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 const BN = require('bn.js');
 const bs58 = require('bs58').default;
-require('dotenv').config();
 
 // Constants
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";

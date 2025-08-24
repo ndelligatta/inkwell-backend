@@ -3,7 +3,6 @@ const { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } = require('@solana/we
 const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 const bs58 = require('bs58').default;
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
 
 // Initialize Supabase client
 const SUPABASE_URL = process.env.SUPABASE_URL;

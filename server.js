@@ -1,5 +1,4 @@
-// CRITICAL: Load environment variables FIRST before any other imports
-require('dotenv').config();
+// Server uses environment variables from Railway, not .env file
 
 // Log environment variables to debug
 console.log('Environment variables loaded:');
