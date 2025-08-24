@@ -266,11 +266,14 @@ app.post('/api/create-config', async (req, res) => {
 // Claim platform fees endpoint
 app.post('/api/claim-platform-fees', async (req, res) => {
   try {
-    console.log('Claiming platform fees...');
+    console.log('====== CLAIM PLATFORM FEES ENDPOINT ======');
+    console.log('Request from:', req.headers.origin || 'Unknown origin');
+    console.log('Authorization:', req.headers.authorization ? 'Present' : 'Missing');
     
     // This endpoint should be protected
     const authHeader = req.headers.authorization;
     if (!authHeader || authHeader !== `Bearer ${process.env.ADMIN_AUTH_TOKEN || 'admin-secret'}`) {
+      console.error('Unauthorized request - missing or invalid auth token');
       return res.status(401).json({
         success: false,
         error: 'Unauthorized. Admin authentication required.'
@@ -278,6 +281,8 @@ app.post('/api/claim-platform-fees', async (req, res) => {
     }
     
     const { poolAddress, poolData } = req.body;
+    console.log('Pool address:', poolAddress);
+    console.log('Pool data:', poolData ? 'Provided' : 'Not provided');
     
     if (!poolAddress) {
       return res.status(400).json({
@@ -286,8 +291,14 @@ app.post('/api/claim-platform-fees', async (req, res) => {
       });
     }
     
+    console.log('Starting fee claim process...');
     // Claim fees from the specified pool
     const result = await claimPoolFees(poolAddress, poolData || {});
+    
+    console.log('Claim result:', result.success ? 'SUCCESS' : 'FAILED');
+    if (!result.success) {
+      console.error('Claim failed:', result.error);
+    }
     
     if (result.success) {
       res.status(200).json(result);
@@ -296,13 +307,23 @@ app.post('/api/claim-platform-fees', async (req, res) => {
     }
     
   } catch (error) {
-    console.error('Error in /api/claim-platform-fees:', error);
+    console.error('====== ERROR IN CLAIM ENDPOINT ======');
+    console.error('Error:', error);
+    console.error('Stack:', error.stack);
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error',
       details: error.toString()
     });
   }
+});
+
+// Handle preflight requests for claim endpoint
+app.options('/api/claim-platform-fees', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.sendStatus(200);
 });
 
 // Get pool fee metrics endpoint
