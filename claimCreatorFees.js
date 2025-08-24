@@ -161,17 +161,29 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
           console.log('Database updated successfully');
           
           // Also update the total_fees_claimed in user_posts
-          const { error: updateError } = await supabase
+          // First get current value
+          const { data: currentPost, error: fetchError } = await supabase
             .from('user_posts')
-            .update({
-              total_fees_claimed: supabase.raw('total_fees_claimed + ?', [solClaimed])
-            })
-            .eq('pool_address', poolAddress);
+            .select('total_fees_claimed')
+            .eq('pool_address', poolAddress)
+            .single();
             
-          if (updateError) {
-            console.error('Failed to update total_fees_claimed:', updateError);
-          } else {
-            console.log('Updated total_fees_claimed for pool');
+          if (!fetchError && currentPost) {
+            const currentClaimed = parseFloat(currentPost.total_fees_claimed || '0');
+            const newTotal = currentClaimed + solClaimed;
+            
+            const { error: updateError } = await supabase
+              .from('user_posts')
+              .update({
+                total_fees_claimed: newTotal
+              })
+              .eq('pool_address', poolAddress);
+              
+            if (updateError) {
+              console.error('Failed to update total_fees_claimed:', updateError);
+            } else {
+              console.log(`Updated total_fees_claimed: ${currentClaimed} + ${solClaimed} = ${newTotal} SOL`);
+            }
           }
         }
       } catch (dbError) {

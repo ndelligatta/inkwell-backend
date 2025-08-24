@@ -10,6 +10,10 @@ const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
+console.log('🔧 Supabase initialization:');
+console.log(`- URL: ${SUPABASE_URL ? 'Found' : '❌ MISSING'}`);
+console.log(`- Anon Key: ${SUPABASE_ANON_KEY ? 'Found' : '❌ MISSING'}`);
+
 const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
@@ -20,6 +24,10 @@ const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
     }
   }
 ) : null;
+
+if (!supabase) {
+  console.error('❌ SUPABASE CLIENT NOT INITIALIZED! Check environment variables.');
+}
 
 // Get lifetime fees for a pool
 async function getLifetimeFees(poolAddress) {
@@ -107,18 +115,28 @@ async function updateAllPoolsLifetimeFees() {
       
       if (result.success) {
         // Update database with lifetime fees
+        console.log(`\n📝 UPDATING DATABASE for pool ${post.pool_address}:`);
+        console.log(`- Post ID: ${post.id}`);
+        console.log(`- Lifetime fees to insert: ${result.lifetimeFees} SOL`);
+        
         const { data, error } = await supabase
           .from('user_posts')
           .update({
             total_fees_generated_all_time: result.lifetimeFees,
             last_fee_update_at: new Date().toISOString()
           })
-          .eq('id', post.id);
+          .eq('id', post.id)
+          .select();
           
         if (error) {
-          console.error(`Failed to update database for ${post.pool_address}:`, error);
+          console.error(`❌ DATABASE UPDATE FAILED for ${post.pool_address}:`, error);
+          console.error(`Error details:`, JSON.stringify(error, null, 2));
         } else {
-          console.log(`✅ Updated ${post.pool_address}: ${result.lifetimeFees} SOL`);
+          console.log(`✅ DATABASE UPDATE SUCCESS for ${post.pool_address}`);
+          console.log(`Returned data:`, data);
+          if (data && data.length > 0) {
+            console.log(`Verified DB value: ${data[0].total_fees_generated_all_time} SOL`);
+          }
         }
       }
       
