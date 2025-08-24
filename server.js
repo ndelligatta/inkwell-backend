@@ -16,7 +16,7 @@ const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenL
 const { createInkwellConfig } = require('./createConfig');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
-const { setupPoolWebhook, processWebhookEvent, listWebhooks, syncAllTimeFees, getAllTimeFees } = require('./heliusWebhookHandlerV2');
+const { getLifetimeFees, updateAllPoolsLifetimeFees } = require('./getLifetimeFees');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -624,23 +624,19 @@ app.post('/api/fees/sync-all', async (req, res) => {
   }
 });
 
-// Get all-time fees for specific pool
-app.get('/api/fees/all-time/:poolAddress', async (req, res) => {
+// Get lifetime fees for specific pool using DBC SDK
+app.get('/api/fees/lifetime/:poolAddress', async (req, res) => {
   try {
     const { poolAddress } = req.params;
     
-    console.log(`Getting all-time fees for pool: ${poolAddress}`);
+    console.log(`Getting lifetime fees for pool: ${poolAddress}`);
     
-    const fees = await getAllTimeFees(poolAddress);
+    const result = await getLifetimeFees(poolAddress);
     
-    res.status(200).json({
-      success: true,
-      poolAddress,
-      allTimeFees: fees
-    });
+    res.status(200).json(result);
     
   } catch (error) {
-    console.error('Error getting all-time fees:', error);
+    console.error('Error getting lifetime fees:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get fees'
@@ -705,26 +701,26 @@ app.listen(PORT, () => {
   console.log(`Config address: ${process.env.DBC_CONFIG_PUBKEY}`);
   console.log(`RPC endpoint: https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY?.substring(0, 8)}...`);
   
-  // Start periodic fee sync (every 5 minutes)
-  console.log('Starting periodic fee sync job...');
+  // Start periodic lifetime fee sync (every 5 minutes)
+  console.log('Starting periodic lifetime fee sync job...');
   setInterval(async () => {
-    console.log('[CRON] Running fee sync...');
+    console.log('[CRON] Running lifetime fee sync...');
     try {
-      await syncAllTimeFees();
-      console.log('[CRON] Fee sync completed');
+      await updateAllPoolsLifetimeFees();
+      console.log('[CRON] Lifetime fee sync completed');
     } catch (error) {
-      console.error('[CRON] Fee sync error:', error);
+      console.error('[CRON] Lifetime fee sync error:', error);
     }
   }, 5 * 60 * 1000); // 5 minutes
   
   // Run initial sync after 10 seconds
   setTimeout(async () => {
-    console.log('[STARTUP] Running initial fee sync...');
+    console.log('[STARTUP] Running initial lifetime fee sync...');
     try {
-      await syncAllTimeFees();
-      console.log('[STARTUP] Initial fee sync completed');
+      await updateAllPoolsLifetimeFees();
+      console.log('[STARTUP] Initial lifetime fee sync completed');
     } catch (error) {
-      console.error('[STARTUP] Initial fee sync error:', error);
+      console.error('[STARTUP] Initial lifetime fee sync error:', error);
     }
   }, 10000);
 });

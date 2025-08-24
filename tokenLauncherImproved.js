@@ -622,16 +622,27 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
         } else {
           console.log('Successfully inserted token launch into user_posts');
           
-          // Set up Helius webhook for real-time fee tracking
+          // Initial fee sync for new pool
           try {
-            const { setupPoolWebhook } = require('./heliusWebhookHandler');
-            console.log('Setting up Helius webhook for pool:', poolAddress);
+            const { getLifetimeFees } = require('./getLifetimeFees');
+            console.log('Getting initial fee data for pool:', poolAddress);
             
-            const webhookResult = await setupPoolWebhook(poolAddress, postData?.id);
-            console.log('Webhook setup successful:', webhookResult.webhookID);
-          } catch (webhookError) {
-            console.error('Failed to setup webhook (non-critical):', webhookError);
-            // Don't fail the launch if webhook setup fails
+            const feeResult = await getLifetimeFees(poolAddress);
+            console.log('Initial fee data:', feeResult);
+            
+            // Update with initial fee data (should be 0 for new pool)
+            if (postData?.id) {
+              await supabase
+                .from('user_posts')
+                .update({
+                  total_fees_generated_all_time: feeResult.lifetimeFees || 0,
+                  last_fee_update_at: new Date().toISOString()
+                })
+                .eq('id', postData.id);
+            }
+          } catch (feeError) {
+            console.error('Failed to sync initial fees (non-critical):', feeError);
+            // Don't fail the launch if fee sync fails
           }
         }
       }

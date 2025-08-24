@@ -248,52 +248,29 @@ async function updatePoolFees(poolAddress, feeAmount, signature) {
   }
 }
 
-// Get all-time fees from Meteora API
+// Get all-time fees from DBC SDK
 async function getAllTimeFees(poolAddress) {
   try {
-    // Try multiple endpoints to get pool data with accumulated fees
-    const endpoints = [
-      `https://damm-api.meteora.ag/pools/${poolAddress}`,
-      `https://dammv2-api.meteora.ag/pools/${poolAddress}`,
-      // Fallback to the old endpoint that returns current fees
-      `https://meteora-ozkfrax2c-meteora-ag.vercel.app/pool/${poolAddress}/fee-metrics`
-    ];
+    // Use the getPoolFeeMetrics function from claimPlatformFees.js
+    const { getPoolFeeMetrics } = require('./claimPlatformFees');
     
-    for (const endpoint of endpoints) {
-      try {
-        console.log(`Trying endpoint: ${endpoint}`);
-        const response = await axios.get(endpoint);
-        
-        if (response.data) {
-          // Check for accumulated_fee_volume (lifetime total)
-          if (response.data.accumulated_fee_volume !== undefined) {
-            const lifetimeFees = parseFloat(response.data.accumulated_fee_volume);
-            console.log(`✅ LIFETIME FEES for ${poolAddress}: ${lifetimeFees} SOL`);
-            console.log(`- From accumulated_fee_volume field`);
-            return lifetimeFees;
-          }
-          
-          // Fallback to current fees if no accumulated data
-          if (response.data.current) {
-            const metrics = response.data;
-            const creatorFees = (parseFloat(metrics.current?.creatorBaseFee || 0) + parseFloat(metrics.current?.creatorQuoteFee || 0)) / 1e9;
-            const platformFees = (parseFloat(metrics.current?.platformBaseFee || 0) + parseFloat(metrics.current?.platformQuoteFee || 0)) / 1e9;
-            const totalFees = creatorFees + platformFees;
-            
-            console.log(`Current fees for ${poolAddress}: ${totalFees} SOL`);
-            console.log(`(Note: This is current unclaimed, not lifetime total)`);
-            
-            return totalFees;
-          }
-        }
-      } catch (err) {
-        console.log(`Failed to fetch from ${endpoint}: ${err.message}`);
-        continue;
-      }
+    console.log(`Getting fee metrics for pool: ${poolAddress}`);
+    const metrics = await getPoolFeeMetrics(poolAddress);
+    
+    if (metrics.success) {
+      // Calculate total fees (all fees generated, not just unclaimed)
+      // The SDK returns current unclaimed fees, not lifetime totals
+      // So we'll need to track this ourselves by accumulating over time
+      const totalFees = metrics.creatorFeeSOL + metrics.platformFeeSOL;
+      
+      console.log(`Current unclaimed fees for ${poolAddress}: ${totalFees} SOL`);
+      console.log(`- Creator: ${metrics.creatorFeeSOL} SOL`);
+      console.log(`- Platform: ${metrics.platformFeeSOL} SOL`);
+      
+      return totalFees;
     }
-    
   } catch (error) {
-    console.error(`Error fetching all-time fees for ${poolAddress}:`, error.message);
+    console.error(`Error fetching fees for ${poolAddress}:`, error.message);
   }
   
   return 0;
