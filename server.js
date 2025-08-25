@@ -18,6 +18,7 @@ const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
 const { getLifetimeFees, updateAllPoolsLifetimeFees } = require('./getLifetimeFees');
 const { updateUserLifetimeFees, updateAllUsersLifetimeFees } = require('./updateUserLifetimeFees');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -70,6 +71,9 @@ const upload = multer({
   storage: storage,
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
+
+// Auth routes
+app.use('/api/auth', authRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
