@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const { verifyPrivyAuth } = require('../middleware/privyAuth');
+const jwt = require('jsonwebtoken');
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -10,8 +11,24 @@ const supabase = createClient(
 );
 
 // Create or update user from Privy authentication
-router.post('/privy-auth', verifyPrivyAuth, async (req, res) => {
+// This endpoint doesn't use middleware because it handles user creation
+router.post('/privy-auth', async (req, res) => {
   try {
+    // Manually verify the token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.decode(token);
+    
+    if (!decoded || !decoded.sub) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const privyUserId = decoded.sub;
+    
     const { 
       walletAddress, 
       oauthIdentifier, 
@@ -19,8 +36,6 @@ router.post('/privy-auth', verifyPrivyAuth, async (req, res) => {
       screenName, 
       profilePictureUrl 
     } = req.body;
-    
-    const privyUserId = req.privyUserId;
     
     // Check if user already exists
     let existingUser = null;
