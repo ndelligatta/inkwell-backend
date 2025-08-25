@@ -578,7 +578,10 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       }
     }
     
-    // ONLY NOW that we have a successful launch, insert into user_posts table
+    // DUPLICATE POST CREATION REMOVED - Frontend handles post creation
+    // The frontend CreatePostDialog already creates the post with token details
+    // This was causing duplicate posts to appear in the timeline
+    /*
     try {
       console.log('Inserting token launch into user_posts table...');
       
@@ -650,6 +653,7 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       console.error('Error inserting into user_posts (non-critical):', postError);
       // Don't fail the token launch if post creation fails
     }
+    */
     
     return {
       success: true,
