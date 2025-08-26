@@ -28,7 +28,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 // Configuration
 const CONFIG = {
   TARGET_POOL_SIZE: parseInt(process.env.KEYPAIR_POOL_SIZE) || 100,
-  BATCH_SIZE: parseInt(process.env.KEYPAIR_BATCH_SIZE) || 10,
+  BATCH_SIZE: parseInt(process.env.KEYPAIR_BATCH_SIZE) || 5, // Reduced from 10 to 5 for faster completion
   CHECK_INTERVAL_MS: parseInt(process.env.CHECK_INTERVAL_MS) || 5000,
   VANITY_SUFFIX: 'PRTY',  // Changed from PARTY to PRTY (4 chars is ~58x faster!)
   VANITY_RATIO: 0.3, // Try to maintain 30% vanity keypairs
@@ -57,6 +57,28 @@ class KeypairWorker {
     console.log(`⏱️  Check interval: ${CONFIG.CHECK_INTERVAL_MS}ms`);
     console.log(`🌐 Supabase URL: ${SUPABASE_URL}`);
     console.log('🚀 =================================\n');
+    
+    // Test database connection
+    console.log('🔍 Testing database connection...');
+    try {
+      const { error } = await supabase
+        .from('keypairs')
+        .select('id')
+        .limit(1);
+      
+      if (error) {
+        console.error('❌ DATABASE CONNECTION ERROR:', error);
+        console.error('Make sure the keypairs table exists and migrations are run!');
+        throw error;
+      }
+      
+      console.log('✅ Database connection successful!\n');
+    } catch (error) {
+      console.error('❌ CRITICAL: Cannot connect to keypairs table');
+      console.error('Error:', error.message);
+      console.error('Please run the database migration to create the keypairs table');
+      throw error;
+    }
     
     this.isRunning = true;
     
@@ -188,10 +210,18 @@ class KeypairWorker {
     
     // Bulk insert to database
     if (keypairs.length > 0) {
-      console.log(`\n💾 Inserting ${keypairs.length} keypairs to database...`);
-      await this.insertKeypairs(keypairs);
-      console.log(`✅ Successfully inserted ${keypairs.length} keypairs to database!`);
-      console.log('🔨 BATCH COMPLETE\n');
+      console.log(`\n💾 PREPARING TO INSERT ${keypairs.length} KEYPAIRS TO DATABASE...`);
+      try {
+        await this.insertKeypairs(keypairs);
+        console.log(`✅ Successfully inserted ${keypairs.length} keypairs to database!`);
+        console.log('🔨 BATCH COMPLETE\n');
+      } catch (insertError) {
+        console.error('❌ FAILED TO INSERT KEYPAIRS:', insertError);
+        console.error('Error message:', insertError.message);
+        // Don't throw - keep the worker running
+      }
+    } else {
+      console.log('⚠️ No keypairs generated in this batch!');
     }
   }
 
