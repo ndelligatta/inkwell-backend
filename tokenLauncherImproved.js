@@ -1,5 +1,5 @@
 // Token launcher using Dynamic Bonding Curve - Improved Backend Implementation with comprehensive error handling
-const { Connection, PublicKey, Keypair, TransactionExpiredBlockheightExceededError } = require('@solana/web3.js');
+const { Connection, PublicKey, Keypair, TransactionExpiredBlockheightExceededError, Transaction, ComputeBudgetProgram } = require('@solana/web3.js');
 const { DynamicBondingCurveClient, deriveDbcPoolAddress } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 const bs58 = require('bs58').default;
 const BN = require('bn.js');
@@ -526,52 +526,25 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       }
     }
     
-    // Prepare transaction
-    const transaction = createPoolTx;
+    // Add priority fee for faster processing
+    const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: 100000 // 0.0001 SOL per compute unit
+    });
     
-    // If initial buy amount is specified, add swap instruction to the SAME transaction
-    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
-      console.log('=== INITIAL DEV BUY SETUP ===');
-      console.log(`Amount: ${metadata.initialBuyAmount} SOL`);
-      console.log(`Pool address: ${poolAddress}`);
-      console.log(`User wallet: ${userKeypair.publicKey.toString()}`);
-      console.log(`Base mint: ${baseMintKP.publicKey.toString()}`);
-      
-      try {
-        console.log('Creating swap instruction...');
-        // Create buy transaction
-        const buyTx = await dbcClient.pool.swap({
-          owner: userKeypair.publicKey,
-          pool: poolAddress,
-          amountIn: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
-          minimumAmountOut: new BN(0), // Accept any amount
-          swapBaseForQuote: false, // false = buy tokens (SOL -> Token)
-          referralTokenAccount: null,
-          payer: userKeypair.publicKey
-        });
-        
-        console.log(`Buy transaction created with ${buyTx.instructions.length} instructions`);
-        
-        // Add buy instructions to the pool creation transaction
-        transaction.add(...buyTx.instructions);
-        console.log('✅ Initial buy instructions added to pool creation transaction');
-        console.log('Initial buy will execute atomically with pool creation');
-      } catch (buyError) {
-        console.error('❌ CRITICAL: Failed to create buy instruction:', buyError);
-        console.error('Error details:', {
-          name: buyError.name,
-          message: buyError.message,
-          stack: buyError.stack
-        });
-        // This is critical - throw to prevent pool creation without dev buy
-        throw new Error(`Failed to setup initial buy: ${buyError.message}`);
-      }
-    } else {
-      console.log('⚠️ No initial buy specified or amount is 0');
-    }
+    const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
+      units: 400000 // Increase compute units for complex transaction
+    });
     
+    // Prepare transaction with priority fee
+    const transaction = new Transaction();
+    transaction.add(priorityFeeIx);
+    transaction.add(computeLimitIx);
+    transaction.add(...createPoolTx.instructions);
     transaction.feePayer = userKeypair.publicKey;
     transaction.recentBlockhash = blockhash;
+    
+    // Note: Initial buy will be done AFTER pool creation confirms
+    // We cannot swap on a pool that doesn't exist yet!
     
     // Sign with both keypairs
     transaction.sign(userKeypair, baseMintKP);
@@ -622,7 +595,7 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
         }
         
         console.log('Transaction confirmed successfully');
-        console.log(`✅ Pool created with${metadata.initialBuyAmount > 0 ? ' initial buy' : 'out initial buy'}`);
+        console.log('✅ Pool created successfully');
         break;
       } catch (error) {
         if (Date.now() - startTime >= confirmationTimeout) {
@@ -634,6 +607,99 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     
     // Pool address was already calculated above
     console.log('Pool created at:', poolAddress);
+    
+    // Perform initial buy if specified - with retry logic
+    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
+      console.log('=== PERFORMING INITIAL DEV BUY ===');
+      console.log(`Amount: ${metadata.initialBuyAmount} SOL`);
+      
+      const maxBuyRetries = 3;
+      let buySuccess = false;
+      let buySignature = null;
+      
+      for (let attempt = 1; attempt <= maxBuyRetries; attempt++) {
+        try {
+          console.log(`Initial buy attempt ${attempt}/${maxBuyRetries}...`);
+          
+          // Create buy transaction
+          const buyTx = await dbcClient.pool.swap({
+            owner: userKeypair.publicKey,
+            pool: new PublicKey(poolAddress),
+            amountIn: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
+            minimumAmountOut: new BN(0), // Accept any amount
+            swapBaseForQuote: false, // false = buy tokens (SOL -> Token)
+            referralTokenAccount: null,
+            payer: userKeypair.publicKey
+          });
+          
+          // Add priority fee for buy transaction
+          const buyPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({
+            microLamports: 200000 // Higher priority for initial buy
+          });
+          
+          const buyComputeLimit = ComputeBudgetProgram.setComputeUnitLimit({
+            units: 300000
+          });
+          
+          // Create new transaction with priority fee
+          const finalBuyTx = new Transaction();
+          finalBuyTx.add(buyPriorityFee);
+          finalBuyTx.add(buyComputeLimit);
+          finalBuyTx.add(...buyTx.instructions);
+          
+          // Sign and send buy transaction
+          finalBuyTx.feePayer = userKeypair.publicKey;
+          finalBuyTx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+          finalBuyTx.sign(userKeypair);
+          
+          buySignature = await connection.sendRawTransaction(
+            finalBuyTx.serialize(),
+            { skipPreflight: false }
+          );
+          
+          console.log(`Buy transaction sent: ${buySignature}`);
+          
+          // Wait for confirmation with shorter timeout
+          const buyConfirmTimeout = 30000; // 30 seconds
+          const buyStartTime = Date.now();
+          
+          while (Date.now() - buyStartTime < buyConfirmTimeout) {
+            try {
+              const confirmation = await connection.confirmTransaction(buySignature, 'confirmed');
+              if (confirmation.value.err) {
+                throw new Error(`Buy transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+              }
+              console.log(`✅ Initial buy confirmed: ${buySignature}`);
+              buySuccess = true;
+              break;
+            } catch (error) {
+              if (Date.now() - buyStartTime >= buyConfirmTimeout) {
+                throw new Error('Buy confirmation timeout');
+              }
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+          
+          if (buySuccess) break;
+          
+        } catch (buyError) {
+          console.error(`Initial buy attempt ${attempt} failed:`, buyError.message);
+          
+          if (attempt < maxBuyRetries) {
+            console.log(`Waiting before retry...`);
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+          } else {
+            console.error('❌ All initial buy attempts failed');
+            // Log the failure but don't fail the whole token launch
+            // The pool exists, just the initial buy didn't go through
+          }
+        }
+      }
+      
+      if (!buySuccess) {
+        console.warn('⚠️ Token launched but initial buy failed - pool may be vulnerable to snipers!');
+      }
+    }
     
     // Log to Supabase - CRITICAL for fee claiming
     try {
