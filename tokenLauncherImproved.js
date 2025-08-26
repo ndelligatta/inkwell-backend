@@ -531,9 +531,14 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     
     // If initial buy amount is specified, add swap instruction to the SAME transaction
     if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
-      console.log(`Adding initial buy of ${metadata.initialBuyAmount} SOL to pool creation transaction...`);
+      console.log('=== INITIAL DEV BUY SETUP ===');
+      console.log(`Amount: ${metadata.initialBuyAmount} SOL`);
+      console.log(`Pool address: ${poolAddress}`);
+      console.log(`User wallet: ${userKeypair.publicKey.toString()}`);
+      console.log(`Base mint: ${baseMintKP.publicKey.toString()}`);
       
       try {
+        console.log('Creating swap instruction...');
         // Create buy transaction
         const buyTx = await dbcClient.pool.swap({
           owner: userKeypair.publicKey,
@@ -545,13 +550,24 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
           payer: userKeypair.publicKey
         });
         
+        console.log(`Buy transaction created with ${buyTx.instructions.length} instructions`);
+        
         // Add buy instructions to the pool creation transaction
         transaction.add(...buyTx.instructions);
-        console.log('Initial buy instruction added - will execute atomically with pool creation');
+        console.log('✅ Initial buy instructions added to pool creation transaction');
+        console.log('Initial buy will execute atomically with pool creation');
       } catch (buyError) {
-        console.error('Failed to create buy instruction:', buyError);
-        // Continue without initial buy rather than fail entire launch
+        console.error('❌ CRITICAL: Failed to create buy instruction:', buyError);
+        console.error('Error details:', {
+          name: buyError.name,
+          message: buyError.message,
+          stack: buyError.stack
+        });
+        // This is critical - throw to prevent pool creation without dev buy
+        throw new Error(`Failed to setup initial buy: ${buyError.message}`);
       }
+    } else {
+      console.log('⚠️ No initial buy specified or amount is 0');
     }
     
     transaction.feePayer = userKeypair.publicKey;
@@ -606,6 +622,7 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
         }
         
         console.log('Transaction confirmed successfully');
+        console.log(`✅ Pool created with${metadata.initialBuyAmount > 0 ? ' initial buy' : 'out initial buy'}`);
         break;
       } catch (error) {
         if (Date.now() - startTime >= confirmationTimeout) {
