@@ -1,6 +1,9 @@
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 
+// Define safe user fields for frontend consumption
+const SAFE_USER_FIELDS = 'id, screen_name, profile_picture_url, banner_url, bio, auth_provider, created_at';
+
 // Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -36,7 +39,7 @@ async function verifyPrivyAuth(req, res, next) {
       // First try by Privy ID if we've stored it
       const { data: userByPrivyId } = await supabase
         .from('users')
-        .select('*')
+        .select(SAFE_USER_FIELDS)
         .eq('privy_user_id', privyUserId)
         .maybeSingle();
       
@@ -47,7 +50,7 @@ async function verifyPrivyAuth(req, res, next) {
         if (decoded.wallet_address) {
           const { data: userByWallet } = await supabase
             .from('users')
-            .select('*')
+            .select(SAFE_USER_FIELDS)
             .eq('wallet_address', decoded.wallet_address)
             .maybeSingle();
           user = userByWallet;
@@ -57,7 +60,7 @@ async function verifyPrivyAuth(req, res, next) {
         if (!user && decoded.email) {
           const { data: userByEmail } = await supabase
             .from('users')
-            .select('*')
+            .select(SAFE_USER_FIELDS)
             .eq('email', decoded.email)
             .maybeSingle();
           user = userByEmail;
@@ -67,7 +70,7 @@ async function verifyPrivyAuth(req, res, next) {
         if (!user && decoded.oauth_identifier) {
           const { data: userByOAuth } = await supabase
             .from('users')
-            .select('*')
+            .select(SAFE_USER_FIELDS)
             .eq('oauth_identifier', decoded.oauth_identifier)
             .maybeSingle();
           user = userByOAuth;

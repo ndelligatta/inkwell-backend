@@ -385,12 +385,16 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     // Get pre-generated keypair from database
     console.log('Fetching pre-generated keypair from pool...');
     try {
+      // Simple query to get a PRTY keypair
       const { data: keypairData, error: keypairError } = await supabase
-        .rpc('get_and_delete_keypair', { prefer_vanity: true });
+        .from('keypairs')
+        .select('*')
+        .eq('has_vanity_suffix', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single();
       
-      if (keypairError) throw keypairError;
-      
-      if (!keypairData || keypairData.length === 0) {
+      if (keypairError || !keypairData) {
         console.warn('No pre-generated keypairs available in pool');
         console.log('Falling back to regular keypair generation...');
         // Fallback to regular keypair if none available
@@ -398,7 +402,7 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
         console.log('Generated fallback token mint:', baseMintKP.publicKey.toString());
       } else {
         // Use the pre-generated keypair
-        const { public_key, secret_key, has_vanity_suffix } = keypairData[0];
+        const { id, public_key, secret_key, has_vanity_suffix } = keypairData;
         const secretKeyArray = bs58.decode(secret_key);
         baseMintKP = Keypair.fromSecretKey(secretKeyArray);
         
@@ -407,6 +411,19 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
         // Verify the keypair matches
         if (baseMintKP.publicKey.toBase58() !== public_key) {
           throw new Error('Keypair verification failed');
+        }
+        
+        // Delete the keypair we just used
+        const { error: deleteError } = await supabase
+          .from('keypairs')
+          .delete()
+          .eq('id', id);
+        
+        if (deleteError) {
+          console.error('Error deleting used keypair:', deleteError);
+          // Continue anyway, token launch is more important
+        } else {
+          console.log('Successfully deleted used keypair from pool');
         }
       }
     } catch (keypairFetchError) {

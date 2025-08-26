@@ -4,6 +4,9 @@ const { createClient } = require('@supabase/supabase-js');
 const { verifyPrivyAuth } = require('../middleware/privyAuth');
 const jwt = require('jsonwebtoken');
 
+// Define safe user fields for frontend consumption
+const SAFE_USER_FIELDS = 'id, screen_name, profile_picture_url, banner_url, bio, auth_provider, created_at';
+
 // Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -43,7 +46,7 @@ router.post('/privy-auth', async (req, res) => {
     // Try to find by Privy ID first
     const { data: userByPrivyId } = await supabase
       .from('users')
-      .select('*')
+      .select(SAFE_USER_FIELDS)
       .eq('privy_user_id', privyUserId)
       .maybeSingle();
     
@@ -54,7 +57,7 @@ router.post('/privy-auth', async (req, res) => {
       if (walletAddress) {
         const { data } = await supabase
           .from('users')
-          .select('*')
+          .select(SAFE_USER_FIELDS)
           .eq('wallet_address', walletAddress)
           .maybeSingle();
         existingUser = data;
@@ -63,7 +66,7 @@ router.post('/privy-auth', async (req, res) => {
       if (!existingUser && oauthIdentifier) {
         const { data } = await supabase
           .from('users')
-          .select('*')
+          .select(SAFE_USER_FIELDS)
           .eq('oauth_identifier', oauthIdentifier)
           .maybeSingle();
         existingUser = data;
@@ -72,7 +75,7 @@ router.post('/privy-auth', async (req, res) => {
       if (!existingUser && email) {
         const { data } = await supabase
           .from('users')
-          .select('*')
+          .select(SAFE_USER_FIELDS)
           .eq('email', email)
           .maybeSingle();
         existingUser = data;
