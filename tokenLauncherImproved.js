@@ -252,8 +252,12 @@ async function uploadMetadata(metadata, mintAddress) {
       }
       
       if (metadata.twitter) {
+        console.log('Adding twitter to metadata:', metadata.twitter);
         metadataJson.attributes.push({ trait_type: "twitter", value: metadata.twitter });
       }
+      
+      // Log the final metadata for debugging
+      console.log('Final metadata JSON:', JSON.stringify(metadataJson, null, 2));
 
       // Step 3: Upload metadata JSON to Supabase
       const metadataBuffer = Buffer.from(JSON.stringify(metadataJson, null, 2));
@@ -306,7 +310,9 @@ async function uploadMetadata(metadata, mintAddress) {
             fallbackJson.attributes.push({ trait_type: "website", value: metadata.website });
           }
           
+          // Twitter should always be present now due to fallback
           if (metadata.twitter) {
+            console.log('Adding twitter to fallback metadata:', metadata.twitter);
             fallbackJson.attributes.push({ trait_type: "twitter", value: metadata.twitter });
           }
           

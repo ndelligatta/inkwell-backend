@@ -132,7 +132,8 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       description: description?.trim() || '',
       // Only include website/twitter if they have actual content
       website: website?.trim() || undefined,
-      twitter: twitter?.trim() || undefined,
+      // ALWAYS include twitter - use BlockParty as fallback
+      twitter: twitter?.trim() || 'https://x.com/blockpartysol',
       initialBuyAmount: parseFloat(initialBuyAmount) || 0.01
     };
 
