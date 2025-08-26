@@ -125,13 +125,14 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       }
     }
 
-    // Prepare metadata
+    // Prepare metadata - ensure website and twitter are properly handled
     const metadata = {
       name: name.trim(),
       symbol: symbol.trim(),
       description: description?.trim() || '',
-      website: website?.trim(),
-      twitter: twitter?.trim(),
+      // Only include website/twitter if they have actual content
+      website: website?.trim() || undefined,
+      twitter: twitter?.trim() || undefined,
       initialBuyAmount: parseFloat(initialBuyAmount) || 0.01
     };
 

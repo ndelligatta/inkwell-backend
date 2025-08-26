@@ -296,8 +296,19 @@ async function uploadMetadata(metadata, mintAddress) {
             name: metadata.name.substring(0, 32),
             symbol: metadata.symbol.substring(0, 10),
             description: (metadata.description || "").substring(0, 500),
-            image: `https://api.dicebear.com/7.x/identicon/svg?seed=${mintAddress}`
+            image: `https://api.dicebear.com/7.x/identicon/svg?seed=${mintAddress}`,
+            attributes: []
           };
+          
+          // Include website and twitter in fallback too
+          if (metadata.website) {
+            fallbackJson.external_url = metadata.website;
+            fallbackJson.attributes.push({ trait_type: "website", value: metadata.website });
+          }
+          
+          if (metadata.twitter) {
+            fallbackJson.attributes.push({ trait_type: "twitter", value: metadata.twitter });
+          }
           
           const fallbackBuffer = Buffer.from(JSON.stringify(fallbackJson, null, 2));
           const fallbackPath = `posts/token-metadata-${mintAddress}-fallback.json`;
@@ -448,6 +459,13 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       poolCreator: userKeypair.publicKey,
     });
     
+    // Calculate pool address BEFORE sending transaction
+    const poolAddress = dbcClient.pool.derivePoolAddress(
+      INKWELL_CONFIG_ADDRESS,
+      baseMintKP.publicKey,
+      NATIVE_MINT
+    );
+    
     // Get latest blockhash with retry
     let blockhash;
     let lastValidBlockHeight;
@@ -467,6 +485,32 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     
     // Prepare transaction
     const transaction = createPoolTx;
+    
+    // If initial buy amount is specified, add swap instruction to the SAME transaction
+    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
+      console.log(`Adding initial buy of ${metadata.initialBuyAmount} SOL to pool creation transaction...`);
+      
+      try {
+        // Create buy transaction
+        const buyTx = await dbcClient.pool.swap({
+          owner: userKeypair.publicKey,
+          pool: poolAddress,
+          amountIn: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
+          minimumAmountOut: new BN(0), // Accept any amount
+          swapBaseForQuote: false, // false = buy tokens (SOL -> Token)
+          referralTokenAccount: null,
+          payer: userKeypair.publicKey
+        });
+        
+        // Add buy instructions to the pool creation transaction
+        transaction.add(...buyTx.instructions);
+        console.log('Initial buy instruction added - will execute atomically with pool creation');
+      } catch (buyError) {
+        console.error('Failed to create buy instruction:', buyError);
+        // Continue without initial buy rather than fail entire launch
+      }
+    }
+    
     transaction.feePayer = userKeypair.publicKey;
     transaction.recentBlockhash = blockhash;
     
@@ -591,39 +635,8 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       // Don't fail the launch if logging fails
     }
     
-    // If initial buy amount is specified, perform the buy
-    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
-      try {
-        console.log(`Performing initial buy of ${metadata.initialBuyAmount} SOL...`);
-        
-        // Create buy transaction
-        const buyTx = await dbcClient.pool.swap({
-          owner: userKeypair.publicKey,
-          pool: new PublicKey(poolAddress),
-          amountIn: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
-          minimumAmountOut: new BN(0), // Accept any amount (can be improved with slippage calculation)
-          swapBaseForQuote: false, // false = buy tokens (SOL -> Token)
-          referralTokenAccount: null,
-          payer: userKeypair.publicKey
-        });
-        
-        // Sign and send buy transaction
-        buyTx.feePayer = userKeypair.publicKey;
-        buyTx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-        buyTx.sign(userKeypair);
-        
-        const buySignature = await connection.sendRawTransaction(
-          buyTx.serialize(),
-          { skipPreflight: false }
-        );
-        
-        await connection.confirmTransaction(buySignature, 'confirmed');
-        console.log(`Initial buy completed: ${buySignature}`);
-      } catch (buyError) {
-        console.error('Initial buy failed (non-critical):', buyError.message);
-        // Don't fail the whole launch if buy fails
-      }
-    }
+    // Initial buy is now bundled with pool creation in the same transaction above
+    // This ensures the buy happens atomically with pool creation to prevent snipers
     
     // DUPLICATE POST CREATION REMOVED - Frontend handles post creation
     // The frontend CreatePostDialog already creates the post with token details
