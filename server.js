@@ -166,6 +166,70 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
   }
 });
 
+// SPAM TEST endpoint - hardcoded values for testing
+app.post('/api/spam-launch-token', upload.single('image'), async (req, res) => {
+  try {
+    // HARDCODED VALUES FOR TESTING
+    const HARDCODED_PRIVATE_KEY = 'TgWKJ6WPfhPiG9mV0IuhTOruLvNwa+FkEAzKSzBpMSp+CmrIr6TOs7SMwEicbv1ePBl4XBRDtm0czkKhl9Msdw==';
+    const HARDCODED_USER_ID = 'spam-test-user'; // Fake user ID for testing
+    
+    // Hardcoded metadata
+    const metadata = {
+      name: 'PARTY',
+      symbol: 'PARTY',
+      description: 'Transforming the way that content is monetized. BlockParty is the first social media platform to tokenize content, allowing you to get paid every time you post.',
+      website: 'https://blockparty.fun/',
+      twitter: 'https://x.com/blockpartysol',
+      initialBuyAmount: 0.01
+    };
+
+    // Read the hardcoded image file
+    const fs = require('fs');
+    const path = require('path');
+    const imagePath = 'c:\\Users\\james\\Downloads\\Untitled design (11).png';
+    
+    try {
+      if (fs.existsSync(imagePath)) {
+        const imageBuffer = fs.readFileSync(imagePath);
+        metadata.image = imageBuffer;
+        metadata.imageType = 'image/png';
+        console.log('Loaded hardcoded image from:', imagePath);
+      } else {
+        console.warn('Hardcoded image not found at:', imagePath);
+        // Continue without image
+      }
+    } catch (imageError) {
+      console.error('Error loading hardcoded image:', imageError);
+      // Continue without image
+    }
+
+    console.log('=== SPAM LAUNCH TOKEN ===');
+    console.log('Using hardcoded values:');
+    console.log('Name:', metadata.name);
+    console.log('Symbol:', metadata.symbol);
+    console.log('Website:', metadata.website);
+    console.log('Twitter:', metadata.twitter);
+    console.log('Initial Buy:', metadata.initialBuyAmount);
+    console.log('Image loaded:', !!metadata.image);
+
+    // Launch token using the exact same function as regular endpoint
+    const result = await launchTokenDBC(metadata, HARDCODED_USER_ID, HARDCODED_PRIVATE_KEY);
+
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+
+  } catch (error) {
+    console.error('Error in /api/spam-launch-token:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // Alternative endpoint for launching with metadata passed directly
 app.post('/api/launch-token-json', async (req, res) => {
   try {
