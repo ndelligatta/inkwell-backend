@@ -460,11 +460,11 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     });
     
     // Calculate pool address BEFORE sending transaction
-    const poolAddress = dbcClient.pool.derivePoolAddress(
-      INKWELL_CONFIG_ADDRESS,
-      baseMintKP.publicKey,
-      NATIVE_MINT
-    );
+    const poolAddress = deriveDbcPoolAddress(
+      NATIVE_MINT, // quote mint (SOL)
+      baseMintKP.publicKey, // base mint (our token)
+      INKWELL_CONFIG_ADDRESS // config
+    ).toString();
     
     // Get latest blockhash with retry
     let blockhash;
