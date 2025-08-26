@@ -20,6 +20,11 @@ const { getLifetimeFees, updateAllPoolsLifetimeFees } = require('./getLifetimeFe
 const { updateUserLifetimeFees, updateAllUsersLifetimeFees } = require('./updateUserLifetimeFees');
 const authRoutes = require('./routes/auth');
 
+// START KEYPAIR WORKER IN BACKGROUND
+console.log('\n🚀🚀🚀 STARTING KEYPAIR GENERATION WORKER 🚀🚀🚀');
+require('./keypairWorker'); // This starts the worker automatically
+console.log('🚀 Keypair worker started in background!\n');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
