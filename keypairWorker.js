@@ -27,8 +27,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 
 // Configuration
 const CONFIG = {
-  TARGET_POOL_SIZE: parseInt(process.env.KEYPAIR_POOL_SIZE) || 100,
-  BATCH_SIZE: parseInt(process.env.KEYPAIR_BATCH_SIZE) || 5, // Reduced from 10 to 5 for faster completion
+  TARGET_POOL_SIZE: parseInt(process.env.KEYPAIR_POOL_SIZE) || 10000, // Increased from 100 to 10,000!
+  BATCH_SIZE: parseInt(process.env.KEYPAIR_BATCH_SIZE) || 10, // Back to 10 since it's working
   CHECK_INTERVAL_MS: parseInt(process.env.CHECK_INTERVAL_MS) || 5000,
   VANITY_SUFFIX: 'PRTY',  // Changed from PARTY to PRTY (4 chars is ~58x faster!)
   VANITY_RATIO: 0.3, // Try to maintain 30% vanity keypairs
@@ -142,21 +142,19 @@ class KeypairWorker {
   }
 
   async getPoolStatus() {
-    const { data, error } = await supabase
+    // ONLY COUNT PRTY KEYPAIRS!
+    const { count, error } = await supabase
       .from('keypairs')
-      .select('has_vanity_suffix', { count: 'exact' });
+      .select('*', { count: 'exact', head: true })
+      .eq('has_vanity_suffix', true);
     
     if (error) throw error;
     
-    const total = data?.length || 0;
-    const vanityCount = data?.filter(k => k.has_vanity_suffix).length || 0;
-    const regularCount = total - vanityCount;
-    
     return {
-      total,
-      vanityCount,
-      regularCount,
-      vanityRatio: total > 0 ? vanityCount / total : 0
+      total: count || 0,  // Only PRTY keypairs count
+      vanityCount: count || 0,
+      regularCount: 0,  // We don't want regular ones!
+      vanityRatio: 1.0  // Always 100% vanity
     };
   }
 
@@ -167,46 +165,43 @@ class KeypairWorker {
     
     const keypairs = [];
     
-    // Determine how many vanity keypairs to generate
-    const needMoreVanity = poolStatus.vanityRatio < CONFIG.VANITY_RATIO;
-    const vanityCount = needMoreVanity ? Math.ceil(batchSize * 0.5) : 0;
-    const regularCount = batchSize - vanityCount;
+    // ONLY GENERATE VANITY KEYPAIRS - NO REGULAR ONES!
+    const vanityCount = batchSize; // ALL should be vanity
     
     console.log(`📊 Batch details:`);
-    console.log(`   - Total to generate: ${batchSize}`);
-    console.log(`   - Vanity keypairs: ${vanityCount}`);
-    console.log(`   - Regular keypairs: ${regularCount}`);
-    console.log(`   - Current vanity ratio: ${(poolStatus.vanityRatio * 100).toFixed(1)}%`);
+    console.log(`   - ONLY GENERATING PRTY ADDRESSES!`);
+    console.log(`   - Target: ${vanityCount} vanity keypairs`);
+    console.log(`   - NO REGULAR KEYPAIRS!`);
     console.log('🔨 =================================\n');
     
-    // Generate vanity keypairs
+    // ONLY Generate vanity keypairs - NO REGULAR ONES!
     for (let i = 0; i < vanityCount; i++) {
-      console.log(`🎯 Generating vanity keypair ${i + 1}/${vanityCount}...`);
-      try {
-        const keypair = await this.generateVanityKeypair();
-        if (keypair) {
-          keypairs.push(keypair);
-          this.stats.vanityGenerated++;
-          console.log(`   ✅ Vanity keypair generated: ${keypair.public_key}`);
+      console.log(`🎯 Generating PRTY keypair ${i + 1}/${vanityCount}...`);
+      let retries = 0;
+      let success = false;
+      
+      while (!success) {
+        try {
+          const keypair = await this.generateVanityKeypair();
+          if (keypair && keypair.has_vanity_suffix) {
+            keypairs.push(keypair);
+            this.stats.vanityGenerated++;
+            this.stats.generated++;
+            console.log(`   ✅ PRTY keypair generated: ${keypair.public_key}`);
+            success = true;
+          } else {
+            console.log(`   ❌ Generated non-PRTY keypair, retrying...`);
+            retries++;
+          }
+        } catch (error) {
+          console.error(`   ❌ Error on attempt ${retries + 1}:`, error.message);
+          retries++;
+          // Keep trying - NO FALLBACK TO REGULAR!
         }
-      } catch (error) {
-        console.error('   ❌ Vanity generation error:', error.message);
-        // Fall back to regular keypair
-        const regularKeypair = this.generateRegularKeypair();
-        keypairs.push(regularKeypair);
-        console.log(`   ⚠️ Fell back to regular keypair: ${regularKeypair.public_key}`);
       }
-      this.stats.generated++;
     }
     
-    // Generate regular keypairs
-    for (let i = 0; i < regularCount; i++) {
-      console.log(`⚡ Generating regular keypair ${i + 1}/${regularCount}...`);
-      const keypair = this.generateRegularKeypair();
-      keypairs.push(keypair);
-      this.stats.generated++;
-      console.log(`   ✅ Regular keypair generated: ${keypair.public_key}`);
-    }
+    // NO REGULAR KEYPAIR GENERATION!
     
     // Bulk insert to database
     if (keypairs.length > 0) {
