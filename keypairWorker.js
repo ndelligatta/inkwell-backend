@@ -20,8 +20,8 @@ const CONFIG = {
   BATCH_SIZE: parseInt(process.env.KEYPAIR_BATCH_SIZE) || 10,
   CHECK_INTERVAL_MS: parseInt(process.env.CHECK_INTERVAL_MS) || 5000,
   VANITY_SUFFIX: 'PRTY',  // Changed from PARTY to PRTY (4 chars is ~58x faster!)
-  VANITY_TIMEOUT_MS: 30000, // 30 seconds per vanity attempt
   VANITY_RATIO: 0.3, // Try to maintain 30% vanity keypairs
+  // NO TIMEOUTS! Will keep searching until found!
 };
 
 class KeypairWorker {
@@ -201,7 +201,8 @@ class KeypairWorker {
     
     console.log(`Searching for address ending with "${CONFIG.VANITY_SUFFIX}"...`);
     
-    while (Date.now() - startTime < CONFIG.VANITY_TIMEOUT_MS) {
+    // NO TIMEOUT - Keep searching until found!
+    while (true) {
       const keypair = Keypair.generate();
       const address = keypair.publicKey.toBase58();
       attempts++;
@@ -223,9 +224,8 @@ class KeypairWorker {
       }
     }
     
-    console.log(`Vanity generation timeout after ${attempts} attempts`);
-    // Return regular keypair if timeout
-    return this.generateRegularKeypair();
+    // This should never happen now - no timeout!
+    console.error(`THIS SHOULD NOT HAPPEN - NO TIMEOUT!`);
   }
 
   async insertKeypairs(keypairs) {
