@@ -241,19 +241,39 @@ async function uploadMetadata(metadata, mintAddress) {
             uri: imageUrl,
             type: metadata.imageType || 'image/png'
           }] : [],
-          category: "image"
+          category: "image",
+          creators: []
         }
       };
       
-      // Add optional fields if provided
+      // Add website as external_url (standard field)
       if (metadata.website) {
         metadataJson.external_url = metadata.website;
-        metadataJson.attributes.push({ trait_type: "website", value: metadata.website });
       }
       
+      // Add social links in multiple places for compatibility
+      const socialLinks = {};
       if (metadata.twitter) {
         console.log('Adding twitter to metadata:', metadata.twitter);
-        metadataJson.attributes.push({ trait_type: "twitter", value: metadata.twitter });
+        socialLinks.twitter = metadata.twitter;
+        // Also add as attribute for compatibility
+        metadataJson.attributes.push({ 
+          trait_type: "twitter", 
+          value: metadata.twitter 
+        });
+      }
+      
+      if (metadata.website) {
+        socialLinks.website = metadata.website;
+        metadataJson.attributes.push({ 
+          trait_type: "website", 
+          value: metadata.website 
+        });
+      }
+      
+      // Add extensions field (used by some explorers)
+      if (Object.keys(socialLinks).length > 0) {
+        metadataJson.extensions = socialLinks;
       }
       
       // Log the final metadata for debugging
@@ -301,19 +321,36 @@ async function uploadMetadata(metadata, mintAddress) {
             symbol: metadata.symbol.substring(0, 10),
             description: (metadata.description || "").substring(0, 500),
             image: `https://api.dicebear.com/7.x/identicon/svg?seed=${mintAddress}`,
-            attributes: []
+            attributes: [],
+            properties: {
+              files: [],
+              category: "image",
+              creators: []
+            }
           };
           
           // Include website and twitter in fallback too
           if (metadata.website) {
             fallbackJson.external_url = metadata.website;
-            fallbackJson.attributes.push({ trait_type: "website", value: metadata.website });
           }
+          
+          // Add extensions for social links
+          const fallbackSocialLinks = {};
           
           // Twitter should always be present now due to fallback
           if (metadata.twitter) {
             console.log('Adding twitter to fallback metadata:', metadata.twitter);
+            fallbackSocialLinks.twitter = metadata.twitter;
             fallbackJson.attributes.push({ trait_type: "twitter", value: metadata.twitter });
+          }
+          
+          if (metadata.website) {
+            fallbackSocialLinks.website = metadata.website;
+            fallbackJson.attributes.push({ trait_type: "website", value: metadata.website });
+          }
+          
+          if (Object.keys(fallbackSocialLinks).length > 0) {
+            fallbackJson.extensions = fallbackSocialLinks;
           }
           
           const fallbackBuffer = Buffer.from(JSON.stringify(fallbackJson, null, 2));
