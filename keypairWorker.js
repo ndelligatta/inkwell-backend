@@ -7,12 +7,23 @@ const { createClient } = require('@supabase/supabase-js');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+console.log('🔐 Supabase configuration:');
+console.log(`   URL: ${SUPABASE_URL}`);
+console.log(`   Service Role Key: ${SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'NOT SET'}`);
+
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('Missing required environment variables');
+  console.error('❌ CRITICAL: Missing required environment variables!');
+  console.error('   SUPABASE_URL:', SUPABASE_URL || 'MISSING');
+  console.error('   SUPABASE_SERVICE_ROLE_KEY:', SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING');
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false
+  }
+});
 
 // Configuration
 const CONFIG = {
@@ -229,17 +240,37 @@ class KeypairWorker {
   }
 
   async insertKeypairs(keypairs) {
-    console.log(`📤 Sending to Supabase...`);
-    const { error } = await supabase
-      .from('keypairs')
-      .insert(keypairs);
+    console.log(`\n📤 INSERTING ${keypairs.length} KEYPAIRS TO DATABASE...`);
+    console.log('📋 Keypairs to insert:');
+    keypairs.forEach((kp, i) => {
+      console.log(`   ${i + 1}. ${kp.public_key} ${kp.has_vanity_suffix ? '✨ VANITY' : ''}`);
+    });
     
-    if (error) {
-      console.error('❌ DATABASE INSERT ERROR:', error);
-      console.error('   Error details:', JSON.stringify(error, null, 2));
+    try {
+      const { data, error } = await supabase
+        .from('keypairs')
+        .insert(keypairs)
+        .select();
+      
+      if (error) {
+        console.error('\n❌ DATABASE INSERT FAILED!');
+        console.error('   Error code:', error.code);
+        console.error('   Error message:', error.message);
+        console.error('   Error details:', error.details);
+        console.error('   Error hint:', error.hint);
+        console.error('   Full error:', JSON.stringify(error, null, 2));
+        throw error;
+      }
+      
+      console.log(`\n✅ DATABASE INSERT SUCCESSFUL!`);
+      console.log(`   Inserted ${data?.length || keypairs.length} keypairs`);
+      if (data && data.length > 0) {
+        console.log('   First keypair ID:', data[0].id);
+      }
+    } catch (error) {
+      console.error('\n❌ CRITICAL DATABASE ERROR:', error.message);
       throw error;
     }
-    console.log(`✅ Database insert successful!`);
   }
 }
 
