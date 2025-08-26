@@ -4,6 +4,7 @@ const { DynamicBondingCurveClient, deriveDbcPoolAddress } = require('@meteora-ag
 const bs58 = require('bs58');
 const BN = require('bn.js');
 const { createClient } = require('@supabase/supabase-js');
+const { generateVanityKeypairMultiThreaded } = require('./vanityKeypairGenerator');
 
 // Native SOL mint address
 const NATIVE_MINT = new PublicKey("So11111111111111111111111111111111111111112");
@@ -382,9 +383,19 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       };
     }
     
-    // Generate new mint keypair
-    baseMintKP = Keypair.generate();
-    console.log('New token mint:', baseMintKP.publicKey.toString());
+    // Generate vanity mint keypair ending with "PARTY"
+    console.log('Generating vanity address ending with PARTY...');
+    try {
+      // Try to generate with multi-threading, 60 second timeout
+      baseMintKP = await generateVanityKeypairMultiThreaded('PARTY', true, 4, 60);
+      console.log('Vanity token mint generated:', baseMintKP.publicKey.toString());
+    } catch (vanityError) {
+      console.warn('Failed to generate vanity address:', vanityError.message);
+      console.log('Falling back to regular keypair generation...');
+      // Fallback to regular keypair if vanity generation fails
+      baseMintKP = Keypair.generate();
+      console.log('Regular token mint:', baseMintKP.publicKey.toString());
+    }
     
     // Upload metadata
     const metadataUri = await uploadMetadata(metadata, baseMintKP.publicKey.toString());
