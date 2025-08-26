@@ -572,13 +572,7 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       }
     }
     
-    // Derive the pool address deterministically
-    const poolAddress = deriveDbcPoolAddress(
-      NATIVE_MINT, // quote mint (SOL)
-      baseMintKP.publicKey, // base mint (our token)
-      INKWELL_CONFIG_ADDRESS // config
-    ).toString();
-    
+    // Pool address was already calculated above
     console.log('Pool created at:', poolAddress);
     
     // Log to Supabase - CRITICAL for fee claiming
