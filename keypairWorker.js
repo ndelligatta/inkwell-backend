@@ -1,6 +1,6 @@
 // Background worker for continuous keypair generation
 const { Keypair } = require('@solana/web3.js');
-const bs58 = require('bs58');
+const bs58 = require('bs58').default;
 const { createClient } = require('@supabase/supabase-js');
 
 // Initialize Supabase client with service role key
@@ -19,8 +19,8 @@ const CONFIG = {
   TARGET_POOL_SIZE: parseInt(process.env.KEYPAIR_POOL_SIZE) || 100,
   BATCH_SIZE: parseInt(process.env.KEYPAIR_BATCH_SIZE) || 10,
   CHECK_INTERVAL_MS: parseInt(process.env.CHECK_INTERVAL_MS) || 5000,
-  VANITY_SUFFIX: 'PARTY',
-  VANITY_TIMEOUT_MS: 10000, // 10 seconds per vanity attempt
+  VANITY_SUFFIX: 'PRTY',  // Changed from PARTY to PRTY (4 chars is ~58x faster!)
+  VANITY_TIMEOUT_MS: 30000, // 30 seconds per vanity attempt
   VANITY_RATIO: 0.3, // Try to maintain 30% vanity keypairs
 };
 
@@ -36,11 +36,16 @@ class KeypairWorker {
   }
 
   async start() {
-    console.log('=== KEYPAIR WORKER STARTED ===');
-    console.log(`Target pool size: ${CONFIG.TARGET_POOL_SIZE}`);
-    console.log(`Batch size: ${CONFIG.BATCH_SIZE}`);
-    console.log(`Vanity suffix: ${CONFIG.VANITY_SUFFIX}`);
-    console.log(`Vanity ratio target: ${CONFIG.VANITY_RATIO * 100}%`);
+    console.log('\n🚀 =================================');
+    console.log('🚀 KEYPAIR WORKER SERVICE STARTED');
+    console.log('🚀 =================================');
+    console.log(`📊 Target pool size: ${CONFIG.TARGET_POOL_SIZE}`);
+    console.log(`📦 Batch size: ${CONFIG.BATCH_SIZE}`);
+    console.log(`✨ Vanity suffix: "${CONFIG.VANITY_SUFFIX}"`);
+    console.log(`🎯 Vanity ratio target: ${CONFIG.VANITY_RATIO * 100}%`);
+    console.log(`⏱️  Check interval: ${CONFIG.CHECK_INTERVAL_MS}ms`);
+    console.log(`🌐 Supabase URL: ${SUPABASE_URL}`);
+    console.log('🚀 =================================\n');
     
     this.isRunning = true;
     
@@ -123,6 +128,10 @@ class KeypairWorker {
   }
 
   async generateBatch(batchSize, poolStatus) {
+    console.log('\n🔨 =================================');
+    console.log('🔨 KEYPAIR GENERATION BATCH STARTING');
+    console.log('🔨 =================================');
+    
     const keypairs = [];
     
     // Determine how many vanity keypairs to generate
@@ -130,36 +139,48 @@ class KeypairWorker {
     const vanityCount = needMoreVanity ? Math.ceil(batchSize * 0.5) : 0;
     const regularCount = batchSize - vanityCount;
     
-    console.log(`Generating ${vanityCount} vanity and ${regularCount} regular keypairs...`);
+    console.log(`📊 Batch details:`);
+    console.log(`   - Total to generate: ${batchSize}`);
+    console.log(`   - Vanity keypairs: ${vanityCount}`);
+    console.log(`   - Regular keypairs: ${regularCount}`);
+    console.log(`   - Current vanity ratio: ${(poolStatus.vanityRatio * 100).toFixed(1)}%`);
+    console.log('🔨 =================================\n');
     
     // Generate vanity keypairs
     for (let i = 0; i < vanityCount; i++) {
+      console.log(`🎯 Generating vanity keypair ${i + 1}/${vanityCount}...`);
       try {
         const keypair = await this.generateVanityKeypair();
         if (keypair) {
           keypairs.push(keypair);
           this.stats.vanityGenerated++;
+          console.log(`   ✅ Vanity keypair generated: ${keypair.public_key}`);
         }
       } catch (error) {
-        console.error('Vanity generation error:', error);
+        console.error('   ❌ Vanity generation error:', error.message);
         // Fall back to regular keypair
         const regularKeypair = this.generateRegularKeypair();
         keypairs.push(regularKeypair);
+        console.log(`   ⚠️ Fell back to regular keypair: ${regularKeypair.public_key}`);
       }
       this.stats.generated++;
     }
     
     // Generate regular keypairs
     for (let i = 0; i < regularCount; i++) {
+      console.log(`⚡ Generating regular keypair ${i + 1}/${regularCount}...`);
       const keypair = this.generateRegularKeypair();
       keypairs.push(keypair);
       this.stats.generated++;
+      console.log(`   ✅ Regular keypair generated: ${keypair.public_key}`);
     }
     
     // Bulk insert to database
     if (keypairs.length > 0) {
+      console.log(`\n💾 Inserting ${keypairs.length} keypairs to database...`);
       await this.insertKeypairs(keypairs);
-      console.log(`Inserted ${keypairs.length} keypairs to database`);
+      console.log(`✅ Successfully inserted ${keypairs.length} keypairs to database!`);
+      console.log('🔨 BATCH COMPLETE\n');
     }
   }
 
@@ -208,14 +229,17 @@ class KeypairWorker {
   }
 
   async insertKeypairs(keypairs) {
+    console.log(`📤 Sending to Supabase...`);
     const { error } = await supabase
       .from('keypairs')
       .insert(keypairs);
     
     if (error) {
-      console.error('Database insert error:', error);
+      console.error('❌ DATABASE INSERT ERROR:', error);
+      console.error('   Error details:', JSON.stringify(error, null, 2));
       throw error;
     }
+    console.log(`✅ Database insert successful!`);
   }
 }
 

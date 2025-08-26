@@ -1,7 +1,7 @@
 // Token launcher using Dynamic Bonding Curve - Improved Backend Implementation with comprehensive error handling
 const { Connection, PublicKey, Keypair, TransactionExpiredBlockheightExceededError } = require('@solana/web3.js');
 const { DynamicBondingCurveClient, deriveDbcPoolAddress } = require('@meteora-ag/dynamic-bonding-curve-sdk');
-const bs58 = require('bs58');
+const bs58 = require('bs58').default;
 const BN = require('bn.js');
 const { createClient } = require('@supabase/supabase-js');
 
