@@ -4,8 +4,8 @@ const { createClient } = require('@supabase/supabase-js');
 const { verifyPrivyAuth } = require('../middleware/privyAuth');
 const jwt = require('jsonwebtoken');
 
-// Define safe user fields for frontend consumption
-const SAFE_USER_FIELDS = 'id, screen_name, profile_picture_url, banner_url, bio, auth_provider, created_at';
+// Define safe user fields for frontend consumption - NEVER EXPOSE PRIVATE KEYS OR SENSITIVE DATA
+const SAFE_USER_FIELDS = 'id, wallet_address, screen_name, profile_picture_url, bio, user_banner, created_at, updated_at, unread_notifications, dev_wallet_public_key, lifetime_fees_generated';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -85,21 +85,23 @@ router.post('/privy-auth', async (req, res) => {
     let user;
     
     if (existingUser) {
-      // Update existing user
+      // Update existing user - only update non-null fields
       const updateData = {
-        privy_user_id: privyUserId,
-        ...(walletAddress && { wallet_address: walletAddress }),
-        ...(oauthIdentifier && { oauth_identifier: oauthIdentifier }),
-        ...(email && { email }),
-        ...(screenName && { screen_name: screenName }),
-        ...(profilePictureUrl && { profile_picture_url: profilePictureUrl }),
+        privy_user_id: privyUserId
       };
+      
+      // Only add fields if they have values
+      if (walletAddress) updateData.wallet_address = walletAddress;
+      if (oauthIdentifier) updateData.oauth_identifier = oauthIdentifier;
+      if (email) updateData.email = email;
+      if (screenName) updateData.screen_name = screenName;
+      if (profilePictureUrl) updateData.profile_picture_url = profilePictureUrl;
       
       const { data, error } = await supabase
         .from('users')
         .update(updateData)
         .eq('id', existingUser.id)
-        .select()
+        .select(SAFE_USER_FIELDS)
         .single();
       
       if (error) throw error;
@@ -117,7 +119,7 @@ router.post('/privy-auth', async (req, res) => {
           profile_picture_url: profilePictureUrl,
           auth_provider: walletAddress ? 'wallet' : oauthIdentifier ? 'oauth' : 'email'
         })
-        .select()
+        .select(SAFE_USER_FIELDS)
         .single();
       
       if (error) throw error;
@@ -192,7 +194,7 @@ router.put('/profile', verifyPrivyAuth, async (req, res) => {
       .from('users')
       .update(updateData)
       .eq('id', userId)
-      .select()
+      .select(SAFE_USER_FIELDS)
       .single();
     
     if (error) throw error;
