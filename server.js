@@ -794,28 +794,28 @@ app.listen(PORT, () => {
   console.log(`Config address: ${process.env.DBC_CONFIG_PUBKEY}`);
   console.log(`RPC endpoint: https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY?.substring(0, 8)}...`);
   
-  // Start periodic lifetime fee sync (every 5 minutes)
-  console.log('Starting periodic lifetime fee sync job...');
-  setInterval(async () => {
-    console.log('[CRON] Running lifetime fee sync...');
-    try {
-      await updateAllPoolsLifetimeFees();
-      console.log('[CRON] Lifetime fee sync completed');
-    } catch (error) {
-      console.error('[CRON] Lifetime fee sync error:', error);
-    }
-  }, 5 * 60 * 1000); // 5 minutes
+  // DISABLED: Periodic fee sync - now using manual refresh only
+  // console.log('Starting periodic lifetime fee sync job...');
+  // setInterval(async () => {
+  //   console.log('[CRON] Running lifetime fee sync...');
+  //   try {
+  //     await updateAllPoolsLifetimeFees();
+  //     console.log('[CRON] Lifetime fee sync completed');
+  //   } catch (error) {
+  //     console.error('[CRON] Lifetime fee sync error:', error);
+  //   }
+  // }, 5 * 60 * 1000); // 5 minutes
   
-  // Run initial sync after 10 seconds
-  setTimeout(async () => {
-    console.log('[STARTUP] Running initial lifetime fee sync...');
-    try {
-      await updateAllPoolsLifetimeFees();
-      console.log('[STARTUP] Initial lifetime fee sync completed');
-    } catch (error) {
-      console.error('[STARTUP] Initial lifetime fee sync error:', error);
-    }
-  }, 10000);
+  // // Run initial sync after 10 seconds
+  // setTimeout(async () => {
+  //   console.log('[STARTUP] Running initial lifetime fee sync...');
+  //   try {
+  //     await updateAllPoolsLifetimeFees();
+  //     console.log('[STARTUP] Initial lifetime fee sync completed');
+  //   } catch (error) {
+  //     console.error('[STARTUP] Initial lifetime fee sync error:', error);
+  //   }
+  // }, 10000);
 });
 
 module.exports = app;
