@@ -4,7 +4,6 @@ const { DynamicBondingCurveClient, deriveDbcPoolAddress } = require('@meteora-ag
 const bs58 = require('bs58');
 const BN = require('bn.js');
 const { createClient } = require('@supabase/supabase-js');
-const { generateVanityKeypairMultiThreaded } = require('./vanityKeypairGenerator');
 
 // Native SOL mint address
 const NATIVE_MINT = new PublicKey("So11111111111111111111111111111111111111112");
@@ -383,18 +382,38 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       };
     }
     
-    // Generate vanity mint keypair ending with "PARTY"
-    console.log('Generating vanity address ending with PARTY...');
+    // Get pre-generated keypair from database
+    console.log('Fetching pre-generated keypair from pool...');
     try {
-      // Try to generate with multi-threading, 60 second timeout
-      baseMintKP = await generateVanityKeypairMultiThreaded('PARTY', true, 4, 60);
-      console.log('Vanity token mint generated:', baseMintKP.publicKey.toString());
-    } catch (vanityError) {
-      console.warn('Failed to generate vanity address:', vanityError.message);
+      const { data: keypairData, error: keypairError } = await supabase
+        .rpc('get_and_delete_keypair', { prefer_vanity: true });
+      
+      if (keypairError) throw keypairError;
+      
+      if (!keypairData || keypairData.length === 0) {
+        console.warn('No pre-generated keypairs available in pool');
+        console.log('Falling back to regular keypair generation...');
+        // Fallback to regular keypair if none available
+        baseMintKP = Keypair.generate();
+        console.log('Generated fallback token mint:', baseMintKP.publicKey.toString());
+      } else {
+        // Use the pre-generated keypair
+        const { public_key, secret_key, has_vanity_suffix } = keypairData[0];
+        const secretKeyArray = bs58.decode(secret_key);
+        baseMintKP = Keypair.fromSecretKey(secretKeyArray);
+        
+        console.log(`Using pre-generated ${has_vanity_suffix ? 'VANITY' : 'regular'} keypair:`, public_key);
+        
+        // Verify the keypair matches
+        if (baseMintKP.publicKey.toBase58() !== public_key) {
+          throw new Error('Keypair verification failed');
+        }
+      }
+    } catch (keypairFetchError) {
+      console.error('Error fetching keypair from pool:', keypairFetchError);
       console.log('Falling back to regular keypair generation...');
-      // Fallback to regular keypair if vanity generation fails
       baseMintKP = Keypair.generate();
-      console.log('Regular token mint:', baseMintKP.publicKey.toString());
+      console.log('Generated fallback token mint:', baseMintKP.publicKey.toString());
     }
     
     // Upload metadata

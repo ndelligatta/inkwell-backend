@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build": "echo 'No build step required for Node.js backend'"
+    "build": "echo 'No build step required for Node.js backend'",
+    "worker": "node keypairWorker.js",
+    "worker:dev": "nodemon keypairWorker.js"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -64,18 +64,34 @@ async function generateVanityKeypair(suffix, caseSensitive = false, maxAttempts 
  * @returns {Promise<Keypair>} - The generated keypair
  */
 async function generateVanityKeypairMultiThreaded(suffix, caseSensitive = false, threads = Math.floor(os.cpus().length / 2), timeout = 300) {
+  console.log('=== VANITY KEYPAIR GENERATION START ===');
+  console.log(`Target suffix: "${suffix}"`);
+  console.log(`Case sensitive: ${caseSensitive}`);
+  console.log(`Worker threads: ${threads}`);
+  console.log(`Timeout: ${timeout} seconds`);
+  console.log(`Available CPUs: ${os.cpus().length}`);
+  console.log(`System info: ${os.type()} ${os.platform()} ${os.arch()}`);
+  console.log(`Node version: ${process.version}`);
+  
   return new Promise((resolve, reject) => {
     const workers = [];
     let found = false;
     const startTime = Date.now();
     let totalAttempts = 0;
+    const workerAttempts = new Map(); // Track attempts per worker
     
-    console.log(`Starting ${threads} worker threads to search for address ending with "${suffix}"...`);
+    console.log(`\nStarting ${threads} worker threads to search for address ending with "${suffix}"...`);
     
     // Set timeout
     const timeoutId = setTimeout(() => {
       if (!found) {
         found = true;
+        console.log('\n=== TIMEOUT REACHED ===');
+        console.log(`Total attempts before timeout: ${totalAttempts.toLocaleString()}`);
+        console.log('Worker attempts breakdown:');
+        workerAttempts.forEach((attempts, workerId) => {
+          console.log(`  Worker ${workerId}: ${attempts.toLocaleString()} attempts`);
+        });
         workers.forEach(w => w.terminate());
         reject(new Error(`Timeout: Failed to find address ending with "${suffix}" after ${timeout} seconds`));
       }
@@ -91,6 +107,8 @@ async function generateVanityKeypairMultiThreaded(suffix, caseSensitive = false,
         if (data.found && !found) {
           found = true;
           clearTimeout(timeoutId);
+          console.log(`\n=== VANITY ADDRESS FOUND ===`);
+          console.log(`Worker found match!`);
           
           // Terminate all workers
           workers.forEach(w => w.terminate());
@@ -99,30 +117,52 @@ async function generateVanityKeypairMultiThreaded(suffix, caseSensitive = false,
           const keypair = Keypair.fromSecretKey(new Uint8Array(data.secretKey));
           
           const elapsed = (Date.now() - startTime) / 1000;
-          console.log(`\nFound vanity address!`);
+          console.log(`\n=== VANITY GENERATION SUCCESS ===`);
           console.log(`Address: ${data.address}`);
+          console.log(`Ends with "${suffix}": ${data.address.endsWith(suffix)}`);
           console.log(`Total attempts: ${(totalAttempts + data.attempts).toLocaleString()}`);
           console.log(`Time: ${elapsed.toFixed(2)}s`);
           console.log(`Rate: ${Math.floor((totalAttempts + data.attempts) / elapsed).toLocaleString()} addresses/second`);
+          console.log(`Workers used: ${threads}`);
+          console.log(`=====================================\n`);
           
           resolve(keypair);
         } else if (!data.found) {
           // Progress update
           totalAttempts += data.attempts;
-          if (totalAttempts % 1000000 === 0) {
+          workerAttempts.set(workers.indexOf(worker), (workerAttempts.get(workers.indexOf(worker)) || 0) + data.attempts);
+          
+          if (totalAttempts % 500000 === 0) {
             const elapsed = (Date.now() - startTime) / 1000;
             const rate = totalAttempts / elapsed;
-            console.log(`Progress: ${totalAttempts.toLocaleString()} total attempts, ${rate.toFixed(0)} addr/sec`);
+            const eta = ((58 ** suffix.length) / rate) / 60; // Rough ETA in minutes
+            console.log(`\n=== PROGRESS UPDATE ===`);
+            console.log(`Total attempts: ${totalAttempts.toLocaleString()}`);
+            console.log(`Rate: ${rate.toFixed(0)} addresses/second`);
+            console.log(`Elapsed: ${elapsed.toFixed(1)}s`);
+            console.log(`Estimated time for "${suffix}": ${eta.toFixed(1)} minutes`);
+            console.log(`======================`);
           }
         }
       });
       
       worker.on('error', (error) => {
-        console.error(`Worker error:`, error);
+        console.error(`\n=== WORKER ERROR ===`);
+        console.error(`Worker ${workers.length} error:`, error);
+        console.error(`Stack:`, error.stack);
+        console.error(`===================`);
+      });
+      
+      worker.on('exit', (code) => {
+        if (code !== 0 && !found) {
+          console.error(`Worker exited with code ${code}`);
+        }
       });
       
       workers.push(worker);
     }
+    
+    console.log(`\nAll ${threads} workers started successfully!`);
   });
 }
 
