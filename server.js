@@ -22,8 +22,14 @@ const authRoutes = require('./routes/auth');
 
 // START KEYPAIR WORKER IN BACKGROUND
 console.log('\n🚀🚀🚀 STARTING KEYPAIR GENERATION WORKER 🚀🚀🚀');
-require('./keypairWorker'); // This starts the worker automatically
-console.log('🚀 Keypair worker started in background!\n');
+try {
+  require('./keypairWorker'); // This starts the worker automatically
+  console.log('🚀 Keypair worker started successfully!\n');
+} catch (error) {
+  console.error('❌ FAILED TO START KEYPAIR WORKER:', error);
+  console.error('Error details:', error.message);
+  console.error('Stack:', error.stack);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -631,6 +637,89 @@ app.use((err, req, res, next) => {
     success: false,
     error: 'Something went wrong!'
   });
+});
+
+// Test keypair worker endpoint
+app.get('/api/test-keypair-worker', async (req, res) => {
+  console.log('\n🔧 TEST KEYPAIR WORKER ENDPOINT CALLED');
+  
+  try {
+    // Test Supabase connection
+    console.log('Testing Supabase connection...');
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false
+        }
+      }
+    );
+    
+    // Try to count keypairs
+    const { count, error: countError } = await supabase
+      .from('keypairs')
+      .select('*', { count: 'exact', head: true });
+    
+    if (countError) {
+      console.error('❌ Supabase count error:', countError);
+      return res.status(500).json({
+        success: false,
+        error: 'Database connection failed',
+        details: countError
+      });
+    }
+    
+    console.log(`✅ Database connected! Current keypair count: ${count}`);
+    
+    // Try to generate and insert one keypair
+    console.log('Generating test keypair...');
+    const { Keypair } = require('@solana/web3.js');
+    const bs58 = require('bs58').default;
+    
+    const keypair = Keypair.generate();
+    const testKeypair = {
+      public_key: keypair.publicKey.toBase58(),
+      secret_key: bs58.encode(keypair.secretKey),
+      has_vanity_suffix: false,
+      vanity_suffix: null
+    };
+    
+    console.log('Inserting test keypair:', testKeypair.public_key);
+    
+    const { data, error } = await supabase
+      .from('keypairs')
+      .insert([testKeypair])
+      .select();
+    
+    if (error) {
+      console.error('❌ Insert error:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to insert keypair',
+        details: error
+      });
+    }
+    
+    console.log('✅ Test keypair inserted successfully!');
+    
+    res.json({
+      success: true,
+      message: 'Keypair worker test successful',
+      currentCount: count,
+      testKeypair: testKeypair.public_key,
+      inserted: data
+    });
+    
+  } catch (error) {
+    console.error('❌ Test failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Start server
