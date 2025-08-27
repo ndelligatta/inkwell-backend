@@ -40,7 +40,13 @@ if (!ADMIN_PRIVATE_KEY) {
 // Get fee metrics for a pool
 async function getPoolFeeMetrics(poolAddress) {
   try {
-    const connection = new Connection(RPC_URL, 'confirmed');
+    const connection = new Connection(RPC_URL, {
+      commitment: 'confirmed',
+      confirmTransactionInitialTimeout: 60000,
+      httpHeaders: {
+        'solana-client': 'inkwell-platform'
+      }
+    });
     const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     const poolPubkey = new PublicKey(poolAddress);
     
@@ -87,8 +93,14 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     console.log('Token:', poolData.metadata?.symbol || poolData.symbol || 'Unknown');
     console.log('Config:', poolData.config_address || CONFIG_ADDRESS);
     
-    // Initialize connection and client
-    const connection = new Connection(RPC_URL, 'confirmed');
+    // Initialize connection with retry and timeout config
+    const connection = new Connection(RPC_URL, {
+      commitment: 'confirmed',
+      confirmTransactionInitialTimeout: 60000,
+      httpHeaders: {
+        'solana-client': 'inkwell-platform'
+      }
+    });
     const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     
     // Create keypairs
@@ -129,15 +141,20 @@ async function claimPoolFees(poolAddress, poolData = {}) {
           originalPool: poolAddress,
           newPoolAddress: migrationStatus.newPoolAddress,
           dammVersion: migrationStatus.dammVersion,
-          config: migrationStatus.config,
-          migrationFeeOption: migrationStatus.migrationFeeOption,
-          message: 'Fees are now accumulating in the new DAMM pool at ' + migrationStatus.newPoolAddress,
+          tokenMint: migrationStatus.tokenMint,
+          message: `Pool has migrated to DAMM ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`,
           poolData
         };
       }
       
       // Pool hasn't migrated and no fees available
-      throw new Error('No fees available to claim');
+      return {
+        success: false,
+        error: 'No fees available to claim',
+        migrated: false,
+        originalPool: poolAddress,
+        message: 'No fees available and pool has not migrated'
+      };
     }
     
     // Check admin wallet balance

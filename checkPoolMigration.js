@@ -21,11 +21,25 @@ async function checkPoolMigration(poolAddress) {
         auth: { persistSession: false, autoRefreshToken: false }
       });
       
-      const { data } = await supabase
+      // First try user_posts table
+      let { data } = await supabase
         .from('user_posts')
         .select('token_mint')
         .eq('pool_address', poolAddress)
         .single();
+      
+      // If not found in user_posts, try token_pools table
+      if (!data || !data.token_mint) {
+        const poolResult = await supabase
+          .from('token_pools')
+          .select('token_mint')
+          .eq('pool_address', poolAddress)
+          .single();
+        
+        if (poolResult.data) {
+          data = poolResult.data;
+        }
+      }
       
       if (data && data.token_mint) {
         tokenMint = data.token_mint;
