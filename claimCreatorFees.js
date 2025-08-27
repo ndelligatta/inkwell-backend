@@ -1,5 +1,5 @@
 // Backend function to claim creator fees from DBC pools
-const { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } = require('@solana/web3.js');
+const { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL, sendAndConfirmTransaction } = require('@solana/web3.js');
 const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 const bs58 = require('bs58').default;
 const { createClient } = require('@supabase/supabase-js');
@@ -179,25 +179,19 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
             claimTx.recentBlockhash = blockhash;
             
             console.log('Sending DAMM v2 creator fee claim transaction...');
-            const signature = await connection.sendRawTransaction(
-              claimTx.serialize(),
-              { 
+            
+            // Use sendAndConfirmTransaction which handles signing and confirmation
+            const signature = await sendAndConfirmTransaction(
+              connection,
+              claimTx,
+              [creatorKeypair], // Signs with creator's keypair
+              {
                 skipPreflight: false,
                 preflightCommitment: 'confirmed',
+                commitment: 'confirmed',
                 maxRetries: 3
               }
             );
-            
-            // Wait for confirmation
-            const confirmation = await connection.confirmTransaction({
-              signature,
-              blockhash,
-              lastValidBlockHeight
-            }, 'confirmed');
-            
-            if (confirmation.value.err) {
-              throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-            }
             
             console.log('✅ Creator fees claimed from DAMM v2!');
             console.log('Transaction:', signature);
