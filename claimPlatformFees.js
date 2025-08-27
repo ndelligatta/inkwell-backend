@@ -4,6 +4,7 @@ const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve
 const bs58 = require('bs58').default;
 const { createClient } = require('@supabase/supabase-js');
 const { checkPoolMigration } = require('./checkPoolMigration');
+const { claimDammV2Fees } = require('./claimDammV2Fees');
 
 // Initialize Supabase client
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -133,18 +134,39 @@ async function claimPoolFees(poolAddress, poolData = {}) {
       console.log('Migration check result:', migrationStatus);
       
       if (migrationStatus.migrated) {
-        // Pool has migrated - return migration info
-        return {
-          success: false,
-          error: 'Pool has migrated to DAMM',
-          migrated: true,
-          originalPool: poolAddress,
-          newPoolAddress: migrationStatus.newPoolAddress,
-          dammVersion: migrationStatus.dammVersion,
-          tokenMint: migrationStatus.tokenMint,
-          message: `Pool has migrated to DAMM ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`,
-          poolData
-        };
+        // Pool has migrated - attempt to claim from DAMM pool
+        console.log(`Pool migrated to ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`);
+        console.log('Attempting to claim fees from DAMM pool...');
+        
+        if (migrationStatus.dammVersion === 'v2') {
+          // Claim from DAMM v2
+          const dammResult = await claimDammV2Fees(migrationStatus.newPoolAddress, poolData);
+          
+          return {
+            ...dammResult,
+            migrated: true,
+            originalPool: poolAddress,
+            newPoolAddress: migrationStatus.newPoolAddress,
+            dammVersion: migrationStatus.dammVersion,
+            tokenMint: migrationStatus.tokenMint,
+            message: dammResult.success 
+              ? `Successfully claimed fees from DAMM ${migrationStatus.dammVersion} pool`
+              : `Pool migrated to DAMM ${migrationStatus.dammVersion} but fee claim failed: ${dammResult.error}`
+          };
+        } else {
+          // DAMM v1 not yet implemented
+          return {
+            success: false,
+            error: 'DAMM v1 fee claiming not yet implemented',
+            migrated: true,
+            originalPool: poolAddress,
+            newPoolAddress: migrationStatus.newPoolAddress,
+            dammVersion: migrationStatus.dammVersion,
+            tokenMint: migrationStatus.tokenMint,
+            message: `Pool migrated to DAMM v1 - fee claiming not yet implemented`,
+            poolData
+          };
+        }
       }
       
       // Pool hasn't migrated and no fees available
