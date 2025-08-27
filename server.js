@@ -653,6 +653,29 @@ app.get('/api/webhooks/list', async (req, res) => {
   }
 });
 
+// Test endpoint for checking pool migration status
+app.get('/api/pool-migration-status/:poolAddress', async (req, res) => {
+  try {
+    const { poolAddress } = req.params;
+    const { checkPoolMigration } = require('./checkPoolMigration');
+    
+    console.log('Checking migration status for pool:', poolAddress);
+    const migrationStatus = await checkPoolMigration(poolAddress);
+    
+    res.status(200).json({
+      success: true,
+      ...migrationStatus
+    });
+    
+  } catch (error) {
+    console.error('Error checking migration status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to check migration status'
+    });
+  }
+});
+
 // Sync all-time fees for all pools
 app.post('/api/fees/sync-all', async (req, res) => {
   try {

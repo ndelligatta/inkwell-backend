@@ -3,6 +3,7 @@ const { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } = require('@solana/we
 const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 const bs58 = require('bs58').default;
 const { createClient } = require('@supabase/supabase-js');
+const { checkPoolMigration } = require('./checkPoolMigration');
 
 // Initialize Supabase client
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -68,6 +69,28 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
     
     // Check if there are fees to claim
     if (feeMetrics.current.creatorBaseFee.isZero() && feeMetrics.current.creatorQuoteFee.isZero()) {
+      console.log('No fees found in original pool - checking if pool has migrated...');
+      
+      // Check if pool has migrated to DAMM
+      const migrationStatus = await checkPoolMigration(poolAddress);
+      console.log('Migration check result:', migrationStatus);
+      
+      if (migrationStatus.migrated) {
+        // Pool has migrated - return migration info instead of throwing error
+        return {
+          success: false,
+          error: 'Pool has migrated to DAMM',
+          migrated: true,
+          originalPool: poolAddress,
+          newPoolAddress: migrationStatus.newPoolAddress,
+          dammVersion: migrationStatus.dammVersion,
+          config: migrationStatus.config,
+          migrationFeeOption: migrationStatus.migrationFeeOption,
+          message: 'Fees are now accumulating in the new DAMM pool at ' + migrationStatus.newPoolAddress
+        };
+      }
+      
+      // Pool hasn't migrated and no fees available
       throw new Error('No creator fees available to claim');
     }
     
