@@ -31,8 +31,14 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
     console.log('Pool:', poolAddress);
     console.log('User ID:', userId);
     
-    // Initialize connection and client
-    const connection = new Connection(RPC_URL, 'confirmed');
+    // Initialize connection with timeout config like platform fees
+    const connection = new Connection(RPC_URL, {
+      commitment: 'confirmed',
+      confirmTransactionInitialTimeout: 60000,
+      httpHeaders: {
+        'solana-client': 'inkwell-creator'
+      }
+    });
     const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     
     // Create keypair from creator private key (try base58 first, then base64)
@@ -52,10 +58,37 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
       }
     }
     
-    // Get fee metrics
+    // Get fee metrics with error handling
     console.log('Fetching fee metrics...');
     const poolPubkey = new PublicKey(poolAddress);
-    const feeMetrics = await dbcClient.state.getPoolFeeMetrics(poolPubkey);
+    let feeMetrics;
+    
+    try {
+      feeMetrics = await dbcClient.state.getPoolFeeMetrics(poolPubkey);
+    } catch (error) {
+      console.error('Failed to fetch fee metrics:', error.message);
+      
+      // On connection error, check if pool has migrated
+      console.log('Checking if pool has migrated...');
+      const migrationStatus = await checkPoolMigration(poolAddress);
+      console.log('Migration check result:', migrationStatus);
+      
+      if (migrationStatus.migrated) {
+        return {
+          success: false,
+          error: 'Pool has migrated to DAMM',
+          migrated: true,
+          originalPool: poolAddress,
+          newPoolAddress: migrationStatus.newPoolAddress,
+          dammVersion: migrationStatus.dammVersion,
+          tokenMint: migrationStatus.tokenMint,
+          message: `Pool has migrated to DAMM ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`
+        };
+      }
+      
+      // Re-throw if not migration related
+      throw error;
+    }
     
     if (!feeMetrics || !feeMetrics.current) {
       throw new Error('No fee metrics found for pool');
@@ -91,7 +124,13 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
       }
       
       // Pool hasn't migrated and no fees available
-      throw new Error('No creator fees available to claim');
+      return {
+        success: false,
+        error: 'No creator fees available to claim',
+        migrated: false,
+        originalPool: poolAddress,
+        message: 'No fees available and pool has not migrated'
+      };
     }
     
     // Check SOL balance for transaction fees
