@@ -490,17 +490,54 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     // Upload metadata
     const metadataUri = await uploadMetadata(metadata, baseMintKP.publicKey.toString());
     
-    // Create pool transaction using the SDK
+    // Create pool transaction - will use createPoolWithFirstBuy if initial buy specified
     console.log('Creating pool transaction...');
-    const createPoolTx = await dbcClient.pool.createPool({
-      baseMint: baseMintKP.publicKey,
-      config: INKWELL_CONFIG_ADDRESS,
-      name: metadata.name.substring(0, 32),
-      symbol: metadata.symbol.substring(0, 10),
-      uri: metadataUri,
-      payer: userKeypair.publicKey,
-      poolCreator: userKeypair.publicKey,
-    });
+    let poolTransactionInstructions;
+    let buyTransactionInstructions = [];
+    
+    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
+      console.log('Using createPoolWithFirstBuy for atomic execution...');
+      
+      // Use createPoolWithFirstBuy for atomic pool creation + initial buy
+      const { createPoolTx, swapBuyTx } = await dbcClient.pool.createPoolWithFirstBuy({
+        createPoolParam: {
+          baseMint: baseMintKP.publicKey,
+          config: INKWELL_CONFIG_ADDRESS,
+          name: metadata.name.substring(0, 32),
+          symbol: metadata.symbol.substring(0, 10),
+          uri: metadataUri,
+          payer: userKeypair.publicKey,
+          poolCreator: userKeypair.publicKey,
+        },
+        firstBuyParam: {
+          buyer: userKeypair.publicKey,
+          buyAmount: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
+          minimumAmountOut: new BN(1), // Accept any amount
+          referralTokenAccount: null,
+        },
+      });
+      
+      poolTransactionInstructions = createPoolTx.instructions;
+      if (swapBuyTx) {
+        buyTransactionInstructions = swapBuyTx.instructions;
+        console.log('Initial buy prepared for atomic execution');
+      }
+    } else {
+      console.log('No initial buy specified, using standard createPool...');
+      
+      // Standard pool creation without buy
+      const createPoolTx = await dbcClient.pool.createPool({
+        baseMint: baseMintKP.publicKey,
+        config: INKWELL_CONFIG_ADDRESS,
+        name: metadata.name.substring(0, 32),
+        symbol: metadata.symbol.substring(0, 10),
+        uri: metadataUri,
+        payer: userKeypair.publicKey,
+        poolCreator: userKeypair.publicKey,
+      });
+      
+      poolTransactionInstructions = createPoolTx.instructions;
+    }
     
     // Calculate pool address BEFORE sending transaction
     const poolAddress = deriveDbcPoolAddress(
@@ -539,35 +576,16 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     const transaction = new Transaction();
     transaction.add(priorityFeeIx);
     transaction.add(computeLimitIx);
-    transaction.add(...createPoolTx.instructions);
+    transaction.add(...poolTransactionInstructions);
+    
+    // Add buy instructions if they exist (from createPoolWithFirstBuy)
+    if (buyTransactionInstructions.length > 0) {
+      transaction.add(...buyTransactionInstructions);
+      console.log('✅ Initial buy bundled atomically with pool creation');
+    }
     transaction.feePayer = userKeypair.publicKey;
     transaction.recentBlockhash = blockhash;
     
-    // Bundle initial buy with pool creation if specified
-    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
-      console.log('=== BUNDLING INITIAL BUY WITH POOL CREATION ===');
-      console.log(`Amount: ${metadata.initialBuyAmount} SOL`);
-      
-      try {
-        // Create buy transaction for the pool that will exist after this transaction
-        const buyTx = await dbcClient.pool.swap({
-          owner: userKeypair.publicKey,
-          pool: new PublicKey(poolAddress), // Use pre-calculated pool address
-          amountIn: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
-          minimumAmountOut: new BN(0), // Accept any amount
-          swapBaseForQuote: false, // false = buy tokens (SOL -> Token)
-          referralTokenAccount: null,
-          payer: userKeypair.publicKey
-        });
-        
-        // Add buy instructions to the SAME transaction
-        transaction.add(...buyTx.instructions);
-        console.log('✅ Initial buy bundled - will execute atomically with pool creation');
-      } catch (buyError) {
-        console.error('Failed to bundle initial buy:', buyError);
-        // Continue without initial buy if bundling fails
-      }
-    }
     
     // Sign with both keypairs
     transaction.sign(userKeypair, baseMintKP);
@@ -631,9 +649,10 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     // Pool address was already calculated above
     console.log('Pool created at:', poolAddress);
     
-    // Only perform separate initial buy if bundling failed
-    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0 && !transaction.instructions.some(ix => ix.programId.equals(dbcClient.program.programId) && ix.data.length > 100)) {
-      console.log('=== PERFORMING SEPARATE INITIAL BUY (bundling must have failed) ===');
+    // Only perform separate initial buy if NOT using createPoolWithFirstBuy
+    // This should never happen now since we use createPoolWithFirstBuy above
+    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0 && buyTransactionInstructions.length === 0) {
+      console.log('=== PERFORMING SEPARATE INITIAL BUY (fallback) ===');
       console.log(`Amount: ${metadata.initialBuyAmount} SOL`);
       
       const maxBuyRetries = 3;
