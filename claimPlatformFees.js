@@ -21,7 +21,7 @@ const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
 ) : null;
 
 // Constants
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
+const HELIUS_API_KEY = "726140d8-6b0d-4719-8702-682d81e94a37";
 const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
 // Admin wallet keys from environment
