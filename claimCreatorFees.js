@@ -4,6 +4,7 @@ const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve
 const bs58 = require('bs58').default;
 const { createClient } = require('@supabase/supabase-js');
 const { checkPoolMigration } = require('./checkPoolMigration');
+const { claimDammV2Fees } = require('./claimDammV2Fees');
 
 // Initialize Supabase client
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -109,18 +110,133 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
       console.log('Migration check result:', migrationStatus);
       
       if (migrationStatus.migrated) {
-        // Pool has migrated - return migration info instead of throwing error
-        return {
-          success: false,
-          error: 'Pool has migrated to DAMM',
-          migrated: true,
-          originalPool: poolAddress,
-          newPoolAddress: migrationStatus.newPoolAddress,
-          dammVersion: migrationStatus.dammVersion,
-          config: migrationStatus.config,
-          migrationFeeOption: migrationStatus.migrationFeeOption,
-          message: 'Fees are now accumulating in the new DAMM pool at ' + migrationStatus.newPoolAddress
-        };
+        // Pool has migrated - attempt to claim from DAMM pool
+        console.log(`Pool migrated to ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`);
+        console.log('Attempting to claim creator fees from DAMM pool...');
+        
+        if (migrationStatus.dammVersion === 'v2') {
+          // For creator fees, we need to use the creator's wallet, not admin
+          // Create a custom claim function for creator
+          const { CpAmm } = require('@meteora-ag/cp-amm-sdk');
+          const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } = require('@solana/spl-token');
+          
+          try {
+            const cpAmm = new CpAmm(connection);
+            const poolPubkey = new PublicKey(migrationStatus.newPoolAddress);
+            
+            // Get pool state
+            console.log('Fetching DAMM pool state...');
+            const poolState = await cpAmm.fetchPoolState(poolPubkey);
+            
+            // Find positions for creator wallet
+            console.log('Finding positions for creator wallet:', creatorKeypair.publicKey.toString());
+            const userPositions = await cpAmm.getUserPositionByPool(
+              poolPubkey,
+              creatorKeypair.publicKey
+            );
+            
+            if (!userPositions || userPositions.length === 0) {
+              return {
+                success: false,
+                error: 'No positions found for creator wallet in DAMM pool',
+                migrated: true,
+                originalPool: poolAddress,
+                newPoolAddress: migrationStatus.newPoolAddress,
+                dammVersion: migrationStatus.dammVersion,
+                message: 'Pool migrated but creator has no positions to claim from'
+              };
+            }
+            
+            console.log(`Found ${userPositions.length} positions for creator`);
+            
+            // Claim from first position (usually there's only one)
+            const position = userPositions[0];
+            console.log('Claiming from position:', position.position?.toString());
+            
+            // Helper to determine token program
+            function getTokenProgram(tokenFlag) {
+              return tokenFlag === 1 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+            }
+            
+            const claimTx = await cpAmm.claimPositionFee2({
+              receiver: creatorKeypair.publicKey,
+              owner: creatorKeypair.publicKey,
+              pool: poolPubkey,
+              position: position.position,
+              positionNftAccount: position.positionNftAccount,
+              tokenAVault: poolState.tokenAVault,
+              tokenBVault: poolState.tokenBVault,
+              tokenAMint: poolState.tokenAMint,
+              tokenBMint: poolState.tokenBMint,
+              tokenAProgram: getTokenProgram(poolState.tokenAFlag),
+              tokenBProgram: getTokenProgram(poolState.tokenBFlag),
+              feePayer: creatorKeypair.publicKey,
+            });
+            
+            // Sign and send
+            claimTx.feePayer = creatorKeypair.publicKey;
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            claimTx.recentBlockhash = blockhash;
+            
+            console.log('Sending DAMM v2 creator fee claim transaction...');
+            const signature = await connection.sendRawTransaction(
+              claimTx.serialize(),
+              { 
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+                maxRetries: 3
+              }
+            );
+            
+            // Wait for confirmation
+            const confirmation = await connection.confirmTransaction({
+              signature,
+              blockhash,
+              lastValidBlockHeight
+            }, 'confirmed');
+            
+            if (confirmation.value.err) {
+              throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+            }
+            
+            console.log('✅ Creator fees claimed from DAMM v2!');
+            console.log('Transaction:', signature);
+            
+            return {
+              success: true,
+              transactionSignature: signature,
+              solscanUrl: `https://solscan.io/tx/${signature}`,
+              migrated: true,
+              originalPool: poolAddress,
+              newPoolAddress: migrationStatus.newPoolAddress,
+              dammVersion: migrationStatus.dammVersion,
+              message: 'Successfully claimed creator fees from DAMM v2 pool'
+            };
+            
+          } catch (dammError) {
+            console.error('Error claiming from DAMM v2:', dammError);
+            return {
+              success: false,
+              error: dammError.message || 'Failed to claim from DAMM v2',
+              migrated: true,
+              originalPool: poolAddress,
+              newPoolAddress: migrationStatus.newPoolAddress,
+              dammVersion: migrationStatus.dammVersion,
+              details: dammError.toString()
+            };
+          }
+        } else {
+          // DAMM v1 not yet implemented
+          return {
+            success: false,
+            error: 'DAMM v1 fee claiming not yet implemented',
+            migrated: true,
+            originalPool: poolAddress,
+            newPoolAddress: migrationStatus.newPoolAddress,
+            dammVersion: migrationStatus.dammVersion,
+            message: 'Pool migrated to DAMM v1 - fee claiming not yet implemented'
+          };
+        }
       }
       
       // Pool hasn't migrated and no fees available
