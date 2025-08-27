@@ -461,6 +461,7 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     }
     
     // Create DBC client
+    console.log('Creating DBC client with connection to:', connection.rpcEndpoint);
     dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     
     // Parse private key
@@ -541,6 +542,13 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       console.log('Using createPoolWithFirstBuy for atomic execution...');
       
       try {
+        console.log('Calling createPoolWithFirstBuy with params:', {
+          baseMint: baseMintKP.publicKey.toString(),
+          config: INKWELL_CONFIG_ADDRESS.toString(),
+          buyAmount: Math.floor(metadata.initialBuyAmount * 1e9),
+          rpcEndpoint: connection.rpcEndpoint
+        });
+        
         // Use createPoolWithFirstBuy for atomic pool creation + initial buy
         const { createPoolTx, swapBuyTx } = await dbcClient.pool.createPoolWithFirstBuy({
           createPoolParam: {
