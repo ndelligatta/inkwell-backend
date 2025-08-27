@@ -811,6 +811,48 @@ app.get('/api/test-keypair-worker', async (req, res) => {
   }
 });
 
+// Daily Bugle Token Launch Endpoint
+app.post('/api/daily-bugle-launch', async (req, res) => {
+  try {
+    console.log('=== DAILY BUGLE LAUNCH ===');
+    console.log('Request from:', req.headers.origin || 'Unknown origin');
+    console.log('Authorization:', req.headers.authorization ? 'Present' : 'Missing');
+    
+    // Check for auth token
+    const authHeader = req.headers.authorization;
+    const expectedToken = process.env.DAILY_BUGLE_AUTH_TOKEN || 'bugle-secret-2024';
+    
+    if (!authHeader || authHeader !== `Bearer ${expectedToken}`) {
+      console.error('Unauthorized Daily Bugle launch attempt');
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized. Daily Bugle auth token required.'
+      });
+    }
+    
+    // Import and execute the Daily Bugle launcher
+    const { launchDailyBugleToken } = require('./dailyBugleLaunch');
+    
+    console.log('Launching Daily Bugle token...');
+    const result = await launchDailyBugleToken();
+    
+    if (result.success) {
+      console.log('✅ Daily Bugle token launched successfully!');
+      res.status(200).json(result);
+    } else {
+      console.error('❌ Daily Bugle launch failed:', result.error);
+      res.status(500).json(result);
+    }
+    
+  } catch (error) {
+    console.error('Error in /api/daily-bugle-launch:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Inkwell backend server running on port ${PORT}`);
