@@ -526,13 +526,13 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       }
     }
     
-    // Add priority fee for faster processing
+    // Add HIGH priority fee to prevent front-running
     const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({
-      microLamports: 100000 // 0.0001 SOL per compute unit
+      microLamports: 500000 // Increased 5x to outbid snipers
     });
     
     const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
-      units: 400000 // Increase compute units for complex transaction
+      units: 800000 // Increased for bundled transaction
     });
     
     // Prepare transaction with priority fee
@@ -543,8 +543,31 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     transaction.feePayer = userKeypair.publicKey;
     transaction.recentBlockhash = blockhash;
     
-    // Note: Initial buy will be done AFTER pool creation confirms
-    // We cannot swap on a pool that doesn't exist yet!
+    // Bundle initial buy with pool creation if specified
+    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
+      console.log('=== BUNDLING INITIAL BUY WITH POOL CREATION ===');
+      console.log(`Amount: ${metadata.initialBuyAmount} SOL`);
+      
+      try {
+        // Create buy transaction for the pool that will exist after this transaction
+        const buyTx = await dbcClient.pool.swap({
+          owner: userKeypair.publicKey,
+          pool: new PublicKey(poolAddress), // Use pre-calculated pool address
+          amountIn: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
+          minimumAmountOut: new BN(0), // Accept any amount
+          swapBaseForQuote: false, // false = buy tokens (SOL -> Token)
+          referralTokenAccount: null,
+          payer: userKeypair.publicKey
+        });
+        
+        // Add buy instructions to the SAME transaction
+        transaction.add(...buyTx.instructions);
+        console.log('✅ Initial buy bundled - will execute atomically with pool creation');
+      } catch (buyError) {
+        console.error('Failed to bundle initial buy:', buyError);
+        // Continue without initial buy if bundling fails
+      }
+    }
     
     // Sign with both keypairs
     transaction.sign(userKeypair, baseMintKP);
@@ -608,9 +631,9 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     // Pool address was already calculated above
     console.log('Pool created at:', poolAddress);
     
-    // Perform initial buy if specified - with retry logic
-    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
-      console.log('=== PERFORMING INITIAL DEV BUY ===');
+    // Only perform separate initial buy if bundling failed
+    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0 && !transaction.instructions.some(ix => ix.programId.equals(dbcClient.program.programId) && ix.data.length > 100)) {
+      console.log('=== PERFORMING SEPARATE INITIAL BUY (bundling must have failed) ===');
       console.log(`Amount: ${metadata.initialBuyAmount} SOL`);
       
       const maxBuyRetries = 3;
