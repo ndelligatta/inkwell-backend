@@ -405,17 +405,59 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
   let baseMintKP;
   
   try {
-    // Initialize connection with fallback
-    try {
-      connection = new Connection(RPC_URL, 'confirmed');
-      // Test connection
-      await connection.getLatestBlockhash();
-      console.log('Connected to Helius RPC');
-    } catch (rpcError) {
-      console.warn('Helius RPC failed, using fallback:', rpcError.message);
-      connection = new Connection(FALLBACK_RPC, 'confirmed');
-      await connection.getLatestBlockhash();
-      console.log('Connected to fallback RPC');
+    // Initialize connection with retry logic
+    const maxConnectionRetries = 3;
+    let connectionEstablished = false;
+    
+    for (let attempt = 1; attempt <= maxConnectionRetries; attempt++) {
+      try {
+        connection = new Connection(RPC_URL, {
+          commitment: 'confirmed',
+          confirmTransactionInitialTimeout: 60000,
+          httpHeaders: {
+            'Content-Type': 'application/json',
+          }
+        });
+        
+        // Test connection with timeout
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 10000)
+        );
+        
+        await Promise.race([
+          connection.getLatestBlockhash(),
+          timeoutPromise
+        ]);
+        
+        console.log('Connected to Helius RPC');
+        connectionEstablished = true;
+        break;
+      } catch (rpcError) {
+        console.warn(`Helius RPC attempt ${attempt} failed:`, rpcError.message);
+        
+        if (attempt === maxConnectionRetries) {
+          // Try fallback RPC
+          try {
+            console.log('Trying fallback RPC...');
+            connection = new Connection(FALLBACK_RPC, {
+              commitment: 'confirmed',
+              confirmTransactionInitialTimeout: 60000
+            });
+            await connection.getLatestBlockhash();
+            console.log('Connected to fallback RPC');
+            connectionEstablished = true;
+          } catch (fallbackError) {
+            throw new Error(`All RPC connections failed: ${fallbackError.message}`);
+          }
+        } else {
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+      }
+    }
+    
+    if (!connectionEstablished) {
+      throw new Error('Failed to establish RPC connection after all attempts');
     }
     
     // Create DBC client
@@ -498,9 +540,35 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
       console.log('Using createPoolWithFirstBuy for atomic execution...');
       
-      // Use createPoolWithFirstBuy for atomic pool creation + initial buy
-      const { createPoolTx, swapBuyTx } = await dbcClient.pool.createPoolWithFirstBuy({
-        createPoolParam: {
+      try {
+        // Use createPoolWithFirstBuy for atomic pool creation + initial buy
+        const { createPoolTx, swapBuyTx } = await dbcClient.pool.createPoolWithFirstBuy({
+          createPoolParam: {
+            baseMint: baseMintKP.publicKey,
+            config: INKWELL_CONFIG_ADDRESS,
+            name: metadata.name.substring(0, 32),
+            symbol: metadata.symbol.substring(0, 10),
+            uri: metadataUri,
+            payer: userKeypair.publicKey,
+            poolCreator: userKeypair.publicKey,
+          },
+          firstBuyParam: {
+            buyer: userKeypair.publicKey,
+            buyAmount: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
+            minimumAmountOut: new BN(1), // Accept any amount
+            referralTokenAccount: null,
+          },
+        });
+        
+        poolTransactionInstructions = createPoolTx.instructions;
+        if (swapBuyTx) {
+          buyTransactionInstructions = swapBuyTx.instructions;
+          console.log('Initial buy prepared for atomic execution');
+        }
+      } catch (createPoolError) {
+        console.error('createPoolWithFirstBuy failed, falling back to standard createPool:', createPoolError.message);
+        // Fall back to standard pool creation without atomic buy
+        const createPoolTx = await dbcClient.pool.createPool({
           baseMint: baseMintKP.publicKey,
           config: INKWELL_CONFIG_ADDRESS,
           name: metadata.name.substring(0, 32),
@@ -508,19 +576,10 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
           uri: metadataUri,
           payer: userKeypair.publicKey,
           poolCreator: userKeypair.publicKey,
-        },
-        firstBuyParam: {
-          buyer: userKeypair.publicKey,
-          buyAmount: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
-          minimumAmountOut: new BN(1), // Accept any amount
-          referralTokenAccount: null,
-        },
-      });
-      
-      poolTransactionInstructions = createPoolTx.instructions;
-      if (swapBuyTx) {
-        buyTransactionInstructions = swapBuyTx.instructions;
-        console.log('Initial buy prepared for atomic execution');
+        });
+        
+        poolTransactionInstructions = createPoolTx.instructions;
+        // Will do separate buy transaction later
       }
     } else {
       console.log('No initial buy specified, using standard createPool...');
