@@ -35,7 +35,7 @@ async function launchDailyBugleToken() {
     description: 'The official token of The Daily Bugle - Your trusted source for all things crypto news! Get your daily dose of Web3 journalism. 🗞️📰',
     image: getDailyBugleImage(),
     imageType: 'image/png',
-    website: 'https://dailybugle.news',
+    website: 'https://dailybugle.fun/',
     twitter: 'https://twitter.com/dailybugleco',
     initialBuyAmount: 0.01 // Dev buy of 0.01 SOL
   };
