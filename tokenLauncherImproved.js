@@ -34,9 +34,12 @@ const supabase = createClient(
 );
 
 // Helius RPC endpoint with fallback
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
+const HELIUS_API_KEY = "726140d8-6b0d-4719-8702-682d81e94a37"; // Hard-coded for testing
 const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 const FALLBACK_RPC = "https://api.mainnet-beta.solana.com";
+
+console.log('Using Helius API Key:', HELIUS_API_KEY);
+console.log('Primary RPC URL:', RPC_URL);
 
 // Inkwell config address - 4% fee, 9 decimals, EXACTLY 1B tokens, 20 SOL threshold, FIXED SUPPLY
 const INKWELL_CONFIG_ADDRESS = new PublicKey(
@@ -405,59 +408,43 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
   let baseMintKP;
   
   try {
-    // Initialize connection with retry logic
-    const maxConnectionRetries = 3;
-    let connectionEstablished = false;
-    
-    for (let attempt = 1; attempt <= maxConnectionRetries; attempt++) {
+    // Initialize connection - prioritize Helius
+    try {
+      console.log('Attempting to connect to Helius RPC...');
+      connection = new Connection(RPC_URL, {
+        commitment: 'confirmed',
+        confirmTransactionInitialTimeout: 60000,
+        httpHeaders: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      // Test connection without aggressive timeout
+      const startTime = Date.now();
+      const blockhash = await connection.getLatestBlockhash();
+      const connectionTime = Date.now() - startTime;
+      
+      console.log(`✅ Connected to Helius RPC successfully in ${connectionTime}ms`);
+      console.log('Blockhash:', blockhash.blockhash);
+      
+    } catch (heliusError) {
+      console.error('❌ Helius RPC failed:', heliusError.message);
+      console.log('Full error:', heliusError);
+      
+      // Try fallback RPC only if Helius fails
       try {
-        connection = new Connection(RPC_URL, {
+        console.log('Attempting fallback RPC...');
+        connection = new Connection(FALLBACK_RPC, {
           commitment: 'confirmed',
-          confirmTransactionInitialTimeout: 60000,
-          httpHeaders: {
-            'Content-Type': 'application/json',
-          }
+          confirmTransactionInitialTimeout: 60000
         });
         
-        // Test connection with timeout
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout')), 10000)
-        );
+        await connection.getLatestBlockhash();
+        console.log('⚠️  Connected to fallback RPC (slower performance expected)');
         
-        await Promise.race([
-          connection.getLatestBlockhash(),
-          timeoutPromise
-        ]);
-        
-        console.log('Connected to Helius RPC');
-        connectionEstablished = true;
-        break;
-      } catch (rpcError) {
-        console.warn(`Helius RPC attempt ${attempt} failed:`, rpcError.message);
-        
-        if (attempt === maxConnectionRetries) {
-          // Try fallback RPC
-          try {
-            console.log('Trying fallback RPC...');
-            connection = new Connection(FALLBACK_RPC, {
-              commitment: 'confirmed',
-              confirmTransactionInitialTimeout: 60000
-            });
-            await connection.getLatestBlockhash();
-            console.log('Connected to fallback RPC');
-            connectionEstablished = true;
-          } catch (fallbackError) {
-            throw new Error(`All RPC connections failed: ${fallbackError.message}`);
-          }
-        } else {
-          // Wait before retry
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-        }
+      } catch (fallbackError) {
+        throw new Error(`All RPC connections failed. Helius: ${heliusError.message}, Fallback: ${fallbackError.message}`);
       }
-    }
-    
-    if (!connectionEstablished) {
-      throw new Error('Failed to establish RPC connection after all attempts');
     }
     
     // Create DBC client
