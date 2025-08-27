@@ -79,6 +79,14 @@ async function claimDammV2Fees(poolAddress, poolData = {}) {
     
     console.log(`Found ${userPositions.length} positions`);
     
+    // Debug first position structure
+    if (userPositions.length > 0) {
+      console.log('\nFirst position structure:');
+      console.log(JSON.stringify(userPositions[0], (key, value) => 
+        typeof value === 'object' && value?.toString ? value.toString() : value
+      , 2));
+    }
+    
     let totalClaimed = 0;
     const results = [];
     
@@ -86,12 +94,19 @@ async function claimDammV2Fees(poolAddress, poolData = {}) {
     for (let i = 0; i < userPositions.length; i++) {
       const position = userPositions[i];
       console.log(`\nProcessing position ${i + 1}/${userPositions.length}...`);
-      console.log('Position address:', position.position.toString());
-      console.log('Position NFT:', position.positionNftAccount.toString());
+      console.log('Position object keys:', Object.keys(position));
+      console.log('Position address:', position.position?.toString());
+      console.log('Position NFT:', position.positionNftAccount?.toString());
       
       try {
-        // Create claim transaction
-        const claimPositionFeesTx = await cpAmm.claimPositionFee({
+        // Validate position data
+        if (!position.position || !position.positionNftAccount) {
+          console.error('Invalid position data:', position);
+          continue;
+        }
+        
+        // Create claim transaction using claimPositionFee2
+        const claimPositionFeesTx = await cpAmm.claimPositionFee2({
           receiver: adminKeypair.publicKey,
           owner: adminKeypair.publicKey,
           pool: poolPubkey,
@@ -103,6 +118,7 @@ async function claimDammV2Fees(poolAddress, poolData = {}) {
           tokenBMint: poolState.tokenBMint,
           tokenAProgram: getTokenProgram(poolState.tokenAFlag),
           tokenBProgram: getTokenProgram(poolState.tokenBFlag),
+          feePayer: adminKeypair.publicKey, // Add explicit fee payer
         });
         
         // Set fee payer and blockhash
@@ -147,8 +163,9 @@ async function claimDammV2Fees(poolAddress, poolData = {}) {
         
       } catch (error) {
         console.error(`Error claiming position ${i + 1}:`, error.message);
+        console.error('Full error:', error);
         results.push({
-          position: position.position.toString(),
+          position: position.position ? position.position.toString() : 'unknown',
           error: error.message,
           success: false
         });
