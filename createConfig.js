@@ -89,7 +89,7 @@ async function createInkwellConfig() {
         numberOfPeriod: new BN(0),
         cliffUnlockAmount: new BN(0),
       },
-      migrationFeeOption: 0,
+      migrationFeeOption: 6, // CUSTOMIZABLE - USE OUR OWN FEE SETTINGS!!!
       tokenSupply: {
         preMigrationTokenSupply: new BN("1000000000000000000"),  // 1B tokens with 9 decimals
         postMigrationTokenSupply: new BN("1000000000000000000")  // 1B tokens with 9 decimals
@@ -101,9 +101,9 @@ async function createInkwellConfig() {
         creatorFeePercentage: 0,
       },
       migratedPoolFee: {
-        poolFeeBps: 0,
-        collectFeeMode: 0,
-        dynamicFee: 0,
+        poolFeeBps: 400, // 4% FEES (400 basis points) - SAME AS PRE-MIGRATION!!!
+        collectFeeMode: 0, // Quote token only (SOL)
+        dynamicFee: 0, // No dynamic fee
       },
       padding: Array(7).fill(new BN(0)),
       curve: bagsCurve, // USE EXACT BAGS CURVE - THIS IS CRITICAL
@@ -173,10 +173,11 @@ async function createInkwellConfig() {
       signature,
       adminWallet: adminKeypair.publicKey.toString(),
       details: {
-        fee: '4% (2% creator, 2% platform)',
+        fee: '4% PRE AND POST MIGRATION (2% creator, 2% platform)',
         tokenSupply: 'EXACTLY 1,000,000,000 tokens',
         decimals: 9,
         migrationThreshold: '20 SOL',
+        migrationFeeOption: 'CUSTOMIZABLE (6) - KEEPS 4% FEES AFTER MIGRATION!',
         curveType: 'Bags exact curve (guaranteed 1B tokens)'
       }
     };
