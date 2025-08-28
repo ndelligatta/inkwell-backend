@@ -148,14 +148,8 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     console.log('Available fees:', availableFeesSOL, 'SOL');
     
     if (feeMetrics.current.partnerBaseFee.isZero() && feeMetrics.current.partnerQuoteFee.isZero()) {
-      console.log('No fees found in original pool');
-      return {
-        success: false,
-        error: 'No fees available in original pool',
-        migrated: false,
-        originalPool: poolAddress,
-        message: 'No fees available in original pool'
-      };
+      console.log('No fees found in original pool - will attempt claim anyway to check for migration');
+      // Don't return early - let it try to claim which will fail and trigger migration check
     }
     
     // Check admin wallet balance
