@@ -30,8 +30,8 @@ async function createInkwellConfig() {
     console.log('Admin wallet:', adminKeypair.publicKey.toString());
     
     // Verify it's the expected wallet
-    if (adminKeypair.publicKey.toString() !== 'KAQmut31iGrghKrnaaJbv7FS87ez6JYkDrVPgLDjXnk') {
-      throw new Error(`Wrong wallet! Expected KAQmut31iGrghKrnaaJbv7FS87ez6JYkDrVPgLDjXnk but got ${adminKeypair.publicKey.toString()}`);
+    if (adminKeypair.publicKey.toString() !== 'Hius8pv1zy2mghHr4zcwRrCUSrwwzUJz3suyXrhXuiSh') {
+      throw new Error(`Wrong wallet! Expected Hius8pv1zy2mghHr4zcwRrCUSrwwzUJz3suyXrhXuiSh but got ${adminKeypair.publicKey.toString()}`);
     }
     
     // Check balance

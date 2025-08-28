@@ -52,7 +52,7 @@ async function retryRpcCall(fn, maxRetries = 3, delayMs = 1000) {
 
 // Admin wallet keys from environment
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
-const ADMIN_PUBLIC_KEY = process.env.ADMIN_PUBLIC_KEY || "KAQmut31iGrghKrnaaJbv7FS87ez6JYkDrVPgLDjXnk";
+const ADMIN_PUBLIC_KEY = process.env.ADMIN_PUBLIC_KEY || "Hius8pv1zy2mghHr4zcwRrCUSrwwzUJz3suyXrhXuiSh";
 
 // Config address mapping
 const CONFIG_ADDRESS = "FpBnATp3c4i3sVo35u6zyZVpnUEDE6RmVsEofEK1YAMU";

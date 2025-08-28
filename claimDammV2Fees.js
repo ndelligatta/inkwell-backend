@@ -10,7 +10,7 @@ const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
 // Admin wallet keys from environment
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
-const ADMIN_PUBLIC_KEY = process.env.ADMIN_PUBLIC_KEY || "KAQmut31iGrghKrnaaJbv7FS87ez6JYkDrVPgLDjXnk";
+const ADMIN_PUBLIC_KEY = process.env.ADMIN_PUBLIC_KEY || "Hius8pv1zy2mghHr4zcwRrCUSrwwzUJz3suyXrhXuiSh";
 
 // Helper to determine token program
 function getTokenProgram(tokenFlag) {
