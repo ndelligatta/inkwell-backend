@@ -55,7 +55,7 @@ const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
 const ADMIN_PUBLIC_KEY = process.env.ADMIN_PUBLIC_KEY || "Hius8pv1zy2mghHr4zcwRrCUSrwwzUJz3suyXrhXuiSh";
 
 // Config address mapping
-const CONFIG_ADDRESS = "FpBnATp3c4i3sVo35u6zyZVpnUEDE6RmVsEofEK1YAMU";
+const CONFIG_ADDRESS = "4wGDGetHZYw6c6MJkiqz8LL5nHMnWvgLGTcF7dypSzGi";
 
 if (!ADMIN_PRIVATE_KEY) {
   console.error('ERROR: Missing required environment variable');

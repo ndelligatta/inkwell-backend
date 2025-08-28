@@ -13,7 +13,7 @@ const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } = require('@solana/spl-token')
 // Constants
 const PRE_MIGRATION_POOL = "DMMkjnyCg89tYPYNZAcFXdt9djWCCbyQwWvvXg1cZuQR";
 const TOKEN_MINT = "BZnmwStz8iapHZoM5YRbvf563qAShUvN28PJDDHvpRTy";
-const CONFIG_ADDRESS = "FpBnATp3c4i3sVo35u6zyZVpnUEDE6RmVsEofEK1YAMU";
+const CONFIG_ADDRESS = "4wGDGetHZYw6c6MJkiqz8LL5nHMnWvgLGTcF7dypSzGi";
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
 const ADMIN_PUBLIC_KEY = "KAQmut31iGrghKrnaaJbv7FS87ez6JYkDrVPgLDjXnk";
 

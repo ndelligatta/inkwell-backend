@@ -44,7 +44,7 @@ console.log('Primary RPC URL:', RPC_URL);
 
 // Inkwell config address - 4% fee, 9 decimals, EXACTLY 1B tokens, 20 SOL threshold, FIXED SUPPLY
 const INKWELL_CONFIG_ADDRESS = new PublicKey(
-  "FpBnATp3c4i3sVo35u6zyZVpnUEDE6RmVsEofEK1YAMU"
+  "4wGDGetHZYw6c6MJkiqz8LL5nHMnWvgLGTcF7dypSzGi"
 );
 
 // Validation functions
