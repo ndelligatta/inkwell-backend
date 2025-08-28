@@ -25,6 +25,31 @@ const supabase = SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(
 const HELIUS_API_KEY = "726140d8-6b0d-4719-8702-682d81e94a37";
 const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
 
+// Helper function to create connection with proper config
+function createConnection() {
+  return new Connection(RPC_URL, {
+    commitment: 'confirmed',
+    confirmTransactionInitialTimeout: 60000,
+    httpHeaders: {
+      'solana-client': 'inkwell-platform'
+    }
+  });
+}
+
+// Helper function to retry RPC calls
+async function retryRpcCall(fn, maxRetries = 3, delayMs = 1000) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      console.log(`RPC call attempt ${i + 1} failed:`, error.message);
+      if (i === maxRetries - 1) throw error;
+      console.log(`Retrying in ${delayMs}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 // Admin wallet keys from environment
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
 const ADMIN_PUBLIC_KEY = process.env.ADMIN_PUBLIC_KEY || "KAQmut31iGrghKrnaaJbv7FS87ez6JYkDrVPgLDjXnk";
@@ -41,18 +66,16 @@ if (!ADMIN_PRIVATE_KEY) {
 // Get fee metrics for a pool
 async function getPoolFeeMetrics(poolAddress) {
   try {
-    const connection = new Connection(RPC_URL, {
-      commitment: 'confirmed',
-      confirmTransactionInitialTimeout: 60000,
-      httpHeaders: {
-        'solana-client': 'inkwell-platform'
-      }
-    });
+    const connection = createConnection();
     const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     const poolPubkey = new PublicKey(poolAddress);
     
     console.log(`Fetching fee metrics for pool ${poolAddress}...`);
-    const feeMetrics = await dbcClient.state.getPoolFeeMetrics(poolPubkey);
+    const feeMetrics = await retryRpcCall(
+      () => dbcClient.state.getPoolFeeMetrics(poolPubkey),
+      3,
+      2000
+    );
     
     if (feeMetrics && feeMetrics.current) {
       const partnerQuoteFeeSOL = feeMetrics.current.partnerQuoteFee.toNumber() / LAMPORTS_PER_SOL;
@@ -95,13 +118,7 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     console.log('Config:', poolData.config_address || CONFIG_ADDRESS);
     
     // Initialize connection with retry and timeout config
-    const connection = new Connection(RPC_URL, {
-      commitment: 'confirmed',
-      confirmTransactionInitialTimeout: 60000,
-      httpHeaders: {
-        'solana-client': 'inkwell-platform'
-      }
-    });
+    const connection = createConnection();
     const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     
     // Create keypairs
@@ -117,7 +134,11 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     
     // Get fee metrics
     console.log('Fetching fee metrics...');
-    const feeMetrics = await dbcClient.state.getPoolFeeMetrics(poolPubkey);
+    const feeMetrics = await retryRpcCall(
+      () => dbcClient.state.getPoolFeeMetrics(poolPubkey),
+      3,
+      2000
+    );
     
     if (!feeMetrics || !feeMetrics.current) {
       throw new Error('No fee metrics found for pool');
@@ -127,62 +148,24 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     console.log('Available fees:', availableFeesSOL, 'SOL');
     
     if (feeMetrics.current.partnerBaseFee.isZero() && feeMetrics.current.partnerQuoteFee.isZero()) {
-      console.log('No fees found in original pool - checking if pool has migrated...');
-      
-      // Check if pool has migrated to DAMM
-      const migrationStatus = await checkPoolMigration(poolAddress);
-      console.log('Migration check result:', migrationStatus);
-      
-      if (migrationStatus.migrated) {
-        // Pool has migrated - attempt to claim from DAMM pool
-        console.log(`Pool migrated to ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`);
-        console.log('Attempting to claim fees from DAMM pool...');
-        
-        if (migrationStatus.dammVersion === 'v2') {
-          // Claim from DAMM v2
-          const dammResult = await claimDammV2Fees(migrationStatus.newPoolAddress, poolData);
-          
-          return {
-            ...dammResult,
-            migrated: true,
-            originalPool: poolAddress,
-            newPoolAddress: migrationStatus.newPoolAddress,
-            dammVersion: migrationStatus.dammVersion,
-            tokenMint: migrationStatus.tokenMint,
-            message: dammResult.success 
-              ? `Successfully claimed fees from DAMM ${migrationStatus.dammVersion} pool`
-              : `Pool migrated to DAMM ${migrationStatus.dammVersion} but fee claim failed: ${dammResult.error}`
-          };
-        } else {
-          // DAMM v1 not yet implemented
-          return {
-            success: false,
-            error: 'DAMM v1 fee claiming not yet implemented',
-            migrated: true,
-            originalPool: poolAddress,
-            newPoolAddress: migrationStatus.newPoolAddress,
-            dammVersion: migrationStatus.dammVersion,
-            tokenMint: migrationStatus.tokenMint,
-            message: `Pool migrated to DAMM v1 - fee claiming not yet implemented`,
-            poolData
-          };
-        }
-      }
-      
-      // Pool hasn't migrated and no fees available
+      console.log('No fees found in original pool');
       return {
         success: false,
-        error: 'No fees available to claim',
+        error: 'No fees available in original pool',
         migrated: false,
         originalPool: poolAddress,
-        message: 'No fees available and pool has not migrated'
+        message: 'No fees available in original pool'
       };
     }
     
     // Check admin wallet balance
     console.log('\nChecking wallet state:');
     
-    const adminAccountInfo = await connection.getAccountInfo(adminKeypair.publicKey);
+    const adminAccountInfo = await retryRpcCall(
+      () => connection.getAccountInfo(adminKeypair.publicKey),
+      3,
+      2000
+    );
     console.log('Admin wallet:');
     console.log('- Balance:', adminAccountInfo ? (adminAccountInfo.lamports / LAMPORTS_PER_SOL).toFixed(6) + ' SOL' : 'Not found');
     console.log('- Data length:', adminAccountInfo?.data.length || 0, 'bytes');
@@ -206,29 +189,41 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     // Sign and send transaction
     console.log('Signing transaction...');
     claimTx.feePayer = adminKeypair.publicKey;
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    const { blockhash, lastValidBlockHeight } = await retryRpcCall(
+      () => connection.getLatestBlockhash('confirmed'),
+      3,
+      2000
+    );
     claimTx.recentBlockhash = blockhash;
     claimTx.sign(adminKeypair); // Admin signs as both fee claimer and payer
     
     console.log('Sending transaction...');
-    const signature = await connection.sendRawTransaction(
-      claimTx.serialize(),
-      { 
-        skipPreflight: false,
-        preflightCommitment: 'confirmed',
-        maxRetries: 3
-      }
+    const signature = await retryRpcCall(
+      () => connection.sendRawTransaction(
+        claimTx.serialize(),
+        { 
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+          maxRetries: 3
+        }
+      ),
+      3,
+      2000
     );
     
     console.log('Transaction sent:', signature);
     console.log('Waiting for confirmation...');
     
     // Wait for confirmation
-    const confirmation = await connection.confirmTransaction({
-      signature,
-      blockhash,
-      lastValidBlockHeight
-    }, 'confirmed');
+    const confirmation = await retryRpcCall(
+      () => connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight
+      }, 'confirmed'),
+      3,
+      2000
+    );
     
     if (confirmation.value.err) {
       throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
@@ -238,7 +233,11 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     console.log('View on Solscan:', `https://solscan.io/tx/${signature}`);
     
     // Verify admin balance after claim
-    const adminBalanceAfter = await connection.getBalance(adminKeypair.publicKey);
+    const adminBalanceAfter = await retryRpcCall(
+      () => connection.getBalance(adminKeypair.publicKey),
+      3,
+      2000
+    );
     console.log('Admin balance after claim:', (adminBalanceAfter / LAMPORTS_PER_SOL).toFixed(6), 'SOL');
     
     // Update database if Supabase is available
@@ -277,6 +276,54 @@ async function claimPoolFees(poolAddress, poolData = {}) {
     console.error('====== CLAIM PLATFORM FEES ERROR ======');
     console.error('Error:', error);
     
+    // ONLY check for migration after original pool claim fails
+    console.log('\nOriginal pool claim failed - checking if pool has migrated...');
+    
+    try {
+      const migrationStatus = await checkPoolMigration(poolAddress);
+      console.log('Migration check result:', migrationStatus);
+      
+      if (migrationStatus.migrated) {
+        // Pool has migrated - attempt to claim from DAMM pool
+        console.log(`Pool migrated to ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`);
+        console.log('Attempting to claim fees from DAMM pool...');
+        
+        if (migrationStatus.dammVersion === 'v2') {
+          // Claim from DAMM v2
+          const dammResult = await claimDammV2Fees(migrationStatus.newPoolAddress, poolData);
+          
+          return {
+            ...dammResult,
+            migrated: true,
+            originalPool: poolAddress,
+            newPoolAddress: migrationStatus.newPoolAddress,
+            dammVersion: migrationStatus.dammVersion,
+            tokenMint: migrationStatus.tokenMint,
+            message: dammResult.success 
+              ? `Successfully claimed fees from DAMM ${migrationStatus.dammVersion} pool (after original pool failed)`
+              : `Pool migrated to DAMM ${migrationStatus.dammVersion} but fee claim failed: ${dammResult.error}`
+          };
+        } else {
+          // DAMM v1 not yet implemented
+          return {
+            success: false,
+            error: 'DAMM v1 fee claiming not yet implemented',
+            migrated: true,
+            originalPool: poolAddress,
+            newPoolAddress: migrationStatus.newPoolAddress,
+            dammVersion: migrationStatus.dammVersion,
+            tokenMint: migrationStatus.tokenMint,
+            message: `Pool migrated to DAMM v1 - fee claiming not yet implemented`,
+            originalPoolError: error.message || 'Unknown error',
+            poolData
+          };
+        }
+      }
+    } catch (migrationCheckError) {
+      console.error('Error checking migration:', migrationCheckError);
+    }
+    
+    // Return original error if no migration or migration check failed
     return {
       success: false,
       error: error.message || 'Unknown error',

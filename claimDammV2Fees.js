@@ -17,6 +17,20 @@ function getTokenProgram(tokenFlag) {
   return tokenFlag === 1 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
 }
 
+// Helper function to retry RPC calls
+async function retryRpcCall(fn, maxRetries = 3, delayMs = 1000) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      console.log(`RPC call attempt ${i + 1} failed:`, error.message);
+      if (i === maxRetries - 1) throw error;
+      console.log(`Retrying in ${delayMs}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 async function claimDammV2Fees(poolAddress, poolData = {}) {
   try {
     console.log('====== CLAIM DAMM V2 FEES START ======');
@@ -51,15 +65,23 @@ async function claimDammV2Fees(poolAddress, poolData = {}) {
     
     // Get pool state
     console.log('Fetching pool state...');
-    const poolState = await cpAmm.fetchPoolState(poolPubkey);
+    const poolState = await retryRpcCall(
+      () => cpAmm.fetchPoolState(poolPubkey),
+      3,
+      2000
+    );
     console.log('Pool state fetched, token A:', poolState.tokenAMint.toString());
     console.log('Token B:', poolState.tokenBMint.toString());
     
     // Find all positions for this pool owned by admin
     console.log('\nFinding positions for admin wallet...');
-    const userPositions = await cpAmm.getUserPositionByPool(
-      poolPubkey,
-      adminKeypair.publicKey
+    const userPositions = await retryRpcCall(
+      () => cpAmm.getUserPositionByPool(
+        poolPubkey,
+        adminKeypair.publicKey
+      ),
+      3,
+      2000
     );
     
     if (!userPositions || userPositions.length === 0) {
@@ -123,7 +145,11 @@ async function claimDammV2Fees(poolAddress, poolData = {}) {
         
         // Set fee payer and blockhash
         claimPositionFeesTx.feePayer = adminKeypair.publicKey;
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+        const { blockhash, lastValidBlockHeight } = await retryRpcCall(
+          () => connection.getLatestBlockhash('confirmed'),
+          3,
+          2000
+        );
         claimPositionFeesTx.recentBlockhash = blockhash;
         
         // Simulate transaction first
