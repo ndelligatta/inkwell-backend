@@ -4,6 +4,7 @@ const {
   DynamicBondingCurveClient,
   deriveDammV1MigrationMetadataAddress,
   deriveDammV2MigrationMetadataAddress,
+  deriveDammV2PoolAddress,
   DAMM_V1_MIGRATION_FEE_ADDRESS,
   DAMM_V2_MIGRATION_FEE_ADDRESS
 } = require('@meteora-ag/dynamic-bonding-curve-sdk');
@@ -79,33 +80,39 @@ async function getMigratedPoolAddress(poolAddress, connection, dammVersion) {
   try {
     const poolPubkey = new PublicKey(poolAddress);
     
-    // Get pool state to extract token mints
-    const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
-    const poolState = await dbcClient.state.getPool(poolPubkey);
-    
-    const baseMint = poolState.baseMint;
-    const quoteMint = poolState.quoteMint;
-    
     if (dammVersion === 'v2') {
-      // Use DAMM v2 config addresses to derive pool
+      // Get pool state to extract token mints
+      const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+      let poolState;
+      
+      try {
+        poolState = await dbcClient.state.getPool(poolPubkey);
+      } catch (error) {
+        // If pool state fails, try to get from migration metadata
+        console.log('Failed to get pool state, trying migration metadata...');
+        throw new Error('Cannot retrieve token mints from migrated pool');
+      }
+      
+      if (!poolState || !poolState.baseMint || !poolState.quoteMint) {
+        throw new Error('Invalid pool state - missing token mints');
+      }
+      
+      // Try each DAMM v2 config to find the migrated pool
       for (let i = 0; i < DAMM_V2_MIGRATION_FEE_ADDRESS.length; i++) {
         const config = DAMM_V2_MIGRATION_FEE_ADDRESS[i];
         
-        // Derive DAMM v2 pool address
-        const [poolAddress] = PublicKey.findProgramAddressSync(
-          [
-            Buffer.from('cp_amm'),
-            baseMint.toBuffer(),
-            quoteMint.toBuffer(),
-            config.toBuffer()
-          ],
-          new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C') // DAMM v2 program ID
+        // Use the official derivation function
+        const migratedPoolAddress = deriveDammV2PoolAddress(
+          config,
+          poolState.baseMint,
+          poolState.quoteMint
         );
         
         // Check if this pool exists
-        const poolAccount = await connection.getAccountInfo(poolAddress);
+        const poolAccount = await connection.getAccountInfo(migratedPoolAddress);
         if (poolAccount) {
-          return poolAddress;
+          console.log(`Found migrated pool at: ${migratedPoolAddress.toString()}`);
+          return migratedPoolAddress;
         }
       }
     }
