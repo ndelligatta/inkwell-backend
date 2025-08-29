@@ -81,20 +81,56 @@ async function getMigratedPoolAddress(poolAddress, connection, dammVersion) {
     const poolPubkey = new PublicKey(poolAddress);
     
     if (dammVersion === 'v2') {
-      // Get pool state to extract token mints
-      const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
-      let poolState;
+      // For known migrated pools, use hardcoded mint addresses
+      // This is temporary until we can decode migration metadata
+      const knownMigratedPools = {
+        'FwRuQKaoJdqcE4JXpfav9xR4a4XnPvdBCr3NrZNP1ELF': {
+          baseMint: new PublicKey('FbCk2TgjKkSR3F63C2SuBtKvN7bLdYCz5tHFGDFPPRtY'),
+          quoteMint: new PublicKey('So11111111111111111111111111111111111111112') // SOL
+        }
+      };
       
-      try {
-        poolState = await dbcClient.state.getPool(poolPubkey);
-      } catch (error) {
-        // If pool state fails, try to get from migration metadata
-        console.log('Failed to get pool state, trying migration metadata...');
-        throw new Error('Cannot retrieve token mints from migrated pool');
-      }
+      let baseMint, quoteMint;
       
-      if (!poolState || !poolState.baseMint || !poolState.quoteMint) {
-        throw new Error('Invalid pool state - missing token mints');
+      // Check if this is a known migrated pool
+      if (knownMigratedPools[poolAddress]) {
+        console.log('Using known mint addresses for migrated pool');
+        baseMint = knownMigratedPools[poolAddress].baseMint;
+        quoteMint = knownMigratedPools[poolAddress].quoteMint;
+      } else {
+        // Try to get pool state (this might fail if already migrated)
+        const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+        let poolState;
+        
+        try {
+          poolState = await dbcClient.state.getPool(poolPubkey);
+          if (!poolState || !poolState.baseMint || !poolState.quoteMint) {
+            throw new Error('Invalid pool state - missing token mints');
+          }
+          baseMint = poolState.baseMint;
+          quoteMint = poolState.quoteMint;
+        } catch (error) {
+          console.error('Failed to get pool state:', error.message);
+          
+          // Try to get from database if available
+          if (supabase) {
+            const { data: poolData } = await supabase
+              .from('token_pools')
+              .select('token_mint')
+              .eq('pool_address', poolAddress)
+              .single();
+              
+            if (poolData && poolData.token_mint) {
+              baseMint = new PublicKey(poolData.token_mint);
+              quoteMint = new PublicKey('So11111111111111111111111111111111111111112'); // SOL
+              console.log('Got token mint from database:', baseMint.toString());
+            } else {
+              throw new Error('Cannot determine token mints for migrated pool');
+            }
+          } else {
+            throw new Error('Cannot retrieve token mints from migrated pool');
+          }
+        }
       }
       
       // Try each DAMM v2 config to find the migrated pool
@@ -104,8 +140,8 @@ async function getMigratedPoolAddress(poolAddress, connection, dammVersion) {
         // Use the official derivation function
         const migratedPoolAddress = deriveDammV2PoolAddress(
           config,
-          poolState.baseMint,
-          poolState.quoteMint
+          baseMint,
+          quoteMint
         );
         
         // Check if this pool exists
