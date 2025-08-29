@@ -8,21 +8,63 @@ const {
   DAMM_V2_MIGRATION_FEE_ADDRESS
 } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 
-const HELIUS_API_KEY = "726140d8-6b0d-4719-8702-682d81e94a37";
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
 const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+const FALLBACK_RPC = "https://api.mainnet-beta.solana.com";
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000;
 
 async function checkPoolMigration(poolAddress) {
   try {
     console.log('Checking migration status for pool:', poolAddress);
     
-    // Initialize connection and client
-    const connection = new Connection(RPC_URL, 'confirmed');
-    const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+    // Initialize connection and client with retry logic
+    let connection;
+    let dbcClient;
+    const rpcUrls = [RPC_URL, FALLBACK_RPC];
+    
+    for (const rpcUrl of rpcUrls) {
+      try {
+        connection = new Connection(rpcUrl, {
+          commitment: 'confirmed',
+          confirmTransactionInitialTimeout: 30000,
+          httpHeaders: {
+            'solana-client': 'inkwell-migration-check'
+          }
+        });
+        await connection.getLatestBlockhash('confirmed');
+        dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+        break;
+      } catch (error) {
+        console.error(`Failed to connect to RPC:`, error.message);
+        if (rpcUrl === FALLBACK_RPC) {
+          throw new Error('All RPC endpoints failed');
+        }
+      }
+    }
+    
     const poolPubkey = new PublicKey(poolAddress);
     
     try {
       // First try to get the pool state to check if it's migrated
-      const poolState = await dbcClient.state.getPool(poolPubkey);
+      let poolState;
+      let retries = 0;
+      
+      while (retries < MAX_RETRIES) {
+        try {
+          poolState = await dbcClient.state.getPool(poolPubkey);
+          break;
+        } catch (error) {
+          retries++;
+          console.error(`Failed to get pool state (attempt ${retries}/${MAX_RETRIES}):`, error.message);
+          
+          if (retries === MAX_RETRIES) {
+            throw error;
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        }
+      }
       
       if (!poolState.isMigrated) {
         console.log('Pool has not migrated yet');

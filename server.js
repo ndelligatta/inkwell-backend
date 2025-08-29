@@ -500,6 +500,65 @@ app.post('/api/verify-pin', async (req, res) => {
 });
 
 // Claim creator fees from a single pool
+// Health check endpoint for RPC connectivity
+app.get('/api/health/rpc', async (req, res) => {
+  try {
+    const { Connection } = require('@solana/web3.js');
+    const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
+    const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+    const FALLBACK_RPC = "https://api.mainnet-beta.solana.com";
+    
+    const results = {};
+    
+    // Test Helius RPC
+    try {
+      const heliusConnection = new Connection(RPC_URL, 'confirmed');
+      const heliusStart = Date.now();
+      const heliusBlockhash = await heliusConnection.getLatestBlockhash('confirmed');
+      results.helius = {
+        status: 'healthy',
+        latency: Date.now() - heliusStart,
+        blockhash: heliusBlockhash.blockhash.substring(0, 8) + '...'
+      };
+    } catch (error) {
+      results.helius = {
+        status: 'unhealthy',
+        error: error.message
+      };
+    }
+    
+    // Test fallback RPC
+    try {
+      const fallbackConnection = new Connection(FALLBACK_RPC, 'confirmed');
+      const fallbackStart = Date.now();
+      const fallbackBlockhash = await fallbackConnection.getLatestBlockhash('confirmed');
+      results.fallback = {
+        status: 'healthy',
+        latency: Date.now() - fallbackStart,
+        blockhash: fallbackBlockhash.blockhash.substring(0, 8) + '...'
+      };
+    } catch (error) {
+      results.fallback = {
+        status: 'unhealthy',
+        error: error.message
+      };
+    }
+    
+    const allHealthy = results.helius.status === 'healthy' || results.fallback.status === 'healthy';
+    
+    res.status(allHealthy ? 200 : 503).json({
+      status: allHealthy ? 'healthy' : 'unhealthy',
+      timestamp: new Date().toISOString(),
+      rpcEndpoints: results
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error.message
+    });
+  }
+});
+
 app.post('/api/claim-creator-fees', async (req, res) => {
   try {
     console.log('====== CLAIM CREATOR FEES ENDPOINT ======');

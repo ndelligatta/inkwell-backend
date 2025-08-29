@@ -22,8 +22,11 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY ? createClient(
 ) : null;
 
 // Constants
-const HELIUS_API_KEY = "726140d8-6b0d-4719-8702-682d81e94a37";
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
 const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+const FALLBACK_RPC = "https://api.mainnet-beta.solana.com";
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000; // 2 seconds
 
 // Claim fees from a single pool
 async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
@@ -33,14 +36,38 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
     console.log('User ID:', userId);
     
     // Initialize connection with timeout config like platform fees
-    const connection = new Connection(RPC_URL, {
-      commitment: 'confirmed',
-      confirmTransactionInitialTimeout: 60000,
-      httpHeaders: {
-        'solana-client': 'inkwell-creator'
+    let connection;
+    let dbcClient;
+    let connectionAttempt = 0;
+    let lastError;
+    
+    // Try primary RPC first, then fallback
+    const rpcUrls = [RPC_URL, FALLBACK_RPC];
+    
+    for (const rpcUrl of rpcUrls) {
+      try {
+        console.log(`Trying RPC: ${rpcUrl === RPC_URL ? 'Helius' : 'Fallback'} endpoint...`);
+        connection = new Connection(rpcUrl, {
+          commitment: 'confirmed',
+          confirmTransactionInitialTimeout: 60000,
+          httpHeaders: {
+            'solana-client': 'inkwell-creator'
+          }
+        });
+        
+        // Test connection with a simple call
+        await connection.getLatestBlockhash('confirmed');
+        dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+        console.log('Connection established successfully');
+        break;
+      } catch (error) {
+        console.error(`Failed to connect to ${rpcUrl === RPC_URL ? 'Helius' : 'Fallback'} RPC:`, error.message);
+        lastError = error;
+        if (rpcUrl === FALLBACK_RPC) {
+          throw new Error(`All RPC endpoints failed: ${lastError.message}`);
+        }
       }
-    });
-    const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+    }
     
     // Create keypair from creator private key (try base58 first, then base64)
     let creatorKeypair;
@@ -64,31 +91,46 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
     const poolPubkey = new PublicKey(poolAddress);
     let feeMetrics;
     
-    try {
-      feeMetrics = await dbcClient.state.getPoolFeeMetrics(poolPubkey);
-    } catch (error) {
-      console.error('Failed to fetch fee metrics:', error.message);
+    // Retry logic for fee metrics
+    let retries = 0;
+    while (retries < MAX_RETRIES) {
+      try {
+        feeMetrics = await dbcClient.state.getPoolFeeMetrics(poolPubkey);
+        break; // Success, exit retry loop
+      } catch (error) {
+        retries++;
+        console.error(`Failed to fetch fee metrics (attempt ${retries}/${MAX_RETRIES}):`, error.message);
+        
+        if (retries === MAX_RETRIES) {
+          // Final attempt failed
+          console.error('All retry attempts exhausted');
       
-      // On connection error, check if pool has migrated
-      console.log('Checking if pool has migrated...');
-      const migrationStatus = await checkPoolMigration(poolAddress);
-      console.log('Migration check result:', migrationStatus);
+          // On connection error, check if pool has migrated
+          console.log('Checking if pool has migrated...');
+          const migrationStatus = await checkPoolMigration(poolAddress);
+          console.log('Migration check result:', migrationStatus);
       
-      if (migrationStatus.migrated) {
-        return {
-          success: false,
-          error: 'Pool has migrated to DAMM',
-          migrated: true,
-          originalPool: poolAddress,
-          newPoolAddress: migrationStatus.newPoolAddress,
-          dammVersion: migrationStatus.dammVersion,
-          tokenMint: migrationStatus.tokenMint,
-          message: `Pool has migrated to DAMM ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`
-        };
+          if (migrationStatus.migrated) {
+            return {
+              success: false,
+              error: 'Pool has migrated to DAMM',
+              migrated: true,
+              originalPool: poolAddress,
+              newPoolAddress: migrationStatus.newPoolAddress,
+              dammVersion: migrationStatus.dammVersion,
+              tokenMint: migrationStatus.tokenMint,
+              message: `Pool has migrated to DAMM ${migrationStatus.dammVersion} at ${migrationStatus.newPoolAddress}`
+            };
+          }
+          
+          // Re-throw if not migration related
+          throw error;
+        }
+        
+        // Wait before retry
+        console.log(`Waiting ${RETRY_DELAY}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
       }
-      
-      // Re-throw if not migration related
-      throw error;
     }
     
     if (!feeMetrics || !feeMetrics.current) {
@@ -268,13 +310,30 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
     claimTx.sign(creatorKeypair);
     
     console.log('Sending transaction...');
-    const signature = await connection.sendRawTransaction(
-      claimTx.serialize(),
-      { 
-        skipPreflight: true,
-        maxRetries: 2
+    let signature;
+    let sendRetries = 0;
+    
+    while (sendRetries < MAX_RETRIES) {
+      try {
+        signature = await connection.sendRawTransaction(
+          claimTx.serialize(),
+          { 
+            skipPreflight: true,
+            maxRetries: 2
+          }
+        );
+        break;
+      } catch (error) {
+        sendRetries++;
+        console.error(`Failed to send transaction (attempt ${sendRetries}/${MAX_RETRIES}):`, error.message);
+        
+        if (sendRetries === MAX_RETRIES) {
+          throw new Error(`Failed to send transaction after ${MAX_RETRIES} attempts: ${error.message}`);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
       }
-    );
+    }
     
     console.log('Transaction sent:', signature);
     console.log('Waiting for confirmation...');
@@ -486,8 +545,30 @@ async function claimAllCreatorFees(userId, creatorPrivateKey) {
 async function checkAvailableCreatorFees(poolAddress) {
   try {
     console.log(`Checking fees for pool: ${poolAddress}`);
-    const connection = new Connection(RPC_URL, 'confirmed');
-    const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+    
+    // Try primary RPC first, then fallback
+    let connection;
+    let dbcClient;
+    const rpcUrls = [RPC_URL, FALLBACK_RPC];
+    
+    for (const rpcUrl of rpcUrls) {
+      try {
+        connection = new Connection(rpcUrl, {
+          commitment: 'confirmed',
+          httpHeaders: {
+            'solana-client': 'inkwell-creator'
+          }
+        });
+        await connection.getLatestBlockhash('confirmed');
+        dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+        break;
+      } catch (error) {
+        console.error(`Failed to connect to RPC:`, error.message);
+        if (rpcUrl === FALLBACK_RPC) {
+          throw new Error('All RPC endpoints failed');
+        }
+      }
+    }
     
     // Get fee metrics directly
     const feeMetrics = await dbcClient.state.getPoolFeeMetrics(new PublicKey(poolAddress));
