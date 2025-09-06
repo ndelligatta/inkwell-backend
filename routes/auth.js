@@ -39,6 +39,28 @@ router.post('/privy-auth', async (req, res) => {
       screenName, 
       profilePictureUrl 
     } = req.body;
+
+    // Derive a safe default screen_name if one isn't provided
+    function deriveScreenName() {
+      if (screenName && typeof screenName === 'string' && screenName.trim().length > 0) return screenName.trim();
+      if (email && typeof email === 'string') {
+        const local = email.split('@')[0];
+        if (local) return local.slice(0, 24); // cap length
+      }
+      if (oauthIdentifier && typeof oauthIdentifier === 'string') {
+        const parts = oauthIdentifier.split(':');
+        const id = parts[1] || oauthIdentifier;
+        return (id.replace(/[^a-zA-Z0-9_\-]/g, '').slice(0, 24)) || 'user';
+      }
+      if (walletAddress && typeof walletAddress === 'string') {
+        const a = walletAddress;
+        const short = a.length > 8 ? `${a.slice(0,4)}...${a.slice(-4)}` : a;
+        return `sol-${short}`;
+      }
+      // fallback to privy user id tail
+      const tail = privyUserId.slice(-6);
+      return `user-${tail}`;
+    }
     
     // Check if user already exists
     let existingUser = null;
@@ -107,7 +129,7 @@ router.post('/privy-auth', async (req, res) => {
       if (error) throw error;
       user = data;
     } else {
-      // Create new user
+      // Create new user (ensure non-null screen_name)
       const { data, error } = await supabase
         .from('users')
         .insert({
@@ -115,7 +137,7 @@ router.post('/privy-auth', async (req, res) => {
           wallet_address: walletAddress,
           oauth_identifier: oauthIdentifier,
           email,
-          screen_name: screenName,
+          screen_name: deriveScreenName(),
           profile_picture_url: profilePictureUrl,
           auth_provider: walletAddress ? 'wallet' : oauthIdentifier ? 'oauth' : 'email'
         })
