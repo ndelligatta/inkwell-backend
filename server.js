@@ -113,16 +113,13 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       });
     }
 
-    // Get user's dev wallet if not provided
-    let privateKey = userPrivateKey;
+    // Require user's Privy embedded wallet private key explicitly
+    const privateKey = userPrivateKey;
     if (!privateKey) {
-      privateKey = await getUserDevWallet(userId);
-      if (!privateKey) {
-        return res.status(400).json({
-          success: false,
-          error: 'User dev wallet not found. Please generate a dev wallet first.'
-        });
-      }
+      return res.status(400).json({
+        success: false,
+        error: 'Missing userPrivateKey. Please export your Privy embedded wallet (Settings → Privy Wallets → View Private Key) and provide it to launch the token.'
+      });
     }
 
     // Prepare metadata - ensure website and twitter are properly handled
@@ -247,16 +244,13 @@ app.post('/api/launch-token-json', async (req, res) => {
       });
     }
 
-    // Get user's dev wallet if not provided
-    let privateKey = userPrivateKey;
+    // Require user's Privy embedded wallet private key explicitly
+    const privateKey = userPrivateKey;
     if (!privateKey) {
-      privateKey = await getUserDevWallet(userId);
-      if (!privateKey) {
-        return res.status(400).json({
-          success: false,
-          error: 'User dev wallet not found. Please generate a dev wallet first.'
-        });
-      }
+      return res.status(400).json({
+        success: false,
+        error: 'Missing userPrivateKey. Please export your Privy embedded wallet (Settings → Privy Wallets → View Private Key) and provide it to launch the token.'
+      });
     }
 
     // Launch token
