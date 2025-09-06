@@ -129,23 +129,68 @@ router.post('/privy-auth', async (req, res) => {
       if (error) throw error;
       user = data;
     } else {
-      // Create new user (ensure non-null screen_name)
-      const { data, error } = await supabase
-        .from('users')
-        .insert({
-          privy_user_id: privyUserId,
-          wallet_address: walletAddress,
-          oauth_identifier: oauthIdentifier,
-          email,
-          screen_name: deriveScreenName(),
-          profile_picture_url: profilePictureUrl,
-          auth_provider: walletAddress ? 'wallet' : oauthIdentifier ? 'oauth' : 'email'
-        })
-        .select(SAFE_USER_FIELDS)
-        .single();
-      
-      if (error) throw error;
-      user = data;
+      // Create new user (ensure non-null screen_name) with duplicate handling
+      let data, error;
+      try {
+        const result = await supabase
+          .from('users')
+          .insert({
+            privy_user_id: privyUserId,
+            wallet_address: walletAddress,
+            oauth_identifier: oauthIdentifier,
+            email,
+            screen_name: deriveScreenName(),
+            profile_picture_url: profilePictureUrl,
+            auth_provider: walletAddress ? 'wallet' : oauthIdentifier ? 'oauth' : 'email'
+          })
+          .select(SAFE_USER_FIELDS)
+          .single();
+        data = result.data; error = result.error;
+      } catch (e) {
+        error = e;
+      }
+
+      if (error) {
+        // Handle duplicate unique constraint races gracefully
+        const msg = error.message || '';
+        if (msg.includes('duplicate key value') || msg.includes('already exists') || error.code === '23505') {
+          // Try to find existing by strongest identifier order
+          let found = null;
+          if (oauthIdentifier) {
+            const { data: d } = await supabase
+              .from('users')
+              .select(SAFE_USER_FIELDS)
+              .eq('oauth_identifier', oauthIdentifier)
+              .maybeSingle();
+            found = d;
+          }
+          if (!found && walletAddress) {
+            const { data: d } = await supabase
+              .from('users')
+              .select(SAFE_USER_FIELDS)
+              .eq('wallet_address', walletAddress)
+              .maybeSingle();
+            found = d;
+          }
+          if (!found) {
+            const { data: d } = await supabase
+              .from('users')
+              .select(SAFE_USER_FIELDS)
+              .eq('privy_user_id', privyUserId)
+              .maybeSingle();
+            found = d;
+          }
+          if (found) {
+            user = found;
+          } else {
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      } else {
+        user = data;
+      }
       
       // Generate dev wallet for new user
       if (user) {
