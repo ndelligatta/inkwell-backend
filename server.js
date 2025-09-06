@@ -13,6 +13,7 @@ const multer = require('multer');
 
 // Import AFTER dotenv is loaded
 const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenLauncherImproved');
+const { signAndSendSolanaTxWithPrivy } = require('./privySession');
 const { createInkwellConfig } = require('./createConfig');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
@@ -102,7 +103,9 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       twitter, 
       initialBuyAmount,
       userId,
-      userWalletAddress // Privy wallet public key (fee payer)
+      userWalletAddress, // Privy wallet public key (fee payer)
+      userPrivyId, // Privy DID for session signer
+      sessionMode // boolean: if true, server will use session signer to send
     } = req.body;
 
     // Validate required fields
@@ -146,6 +149,27 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
 
     // Prepare transaction for frontend Privy signing
     const result = await launchTokenDBC(metadata, userId, null, { prepareOnly: true, userWalletAddress });
+
+    if (sessionMode && result?.success && result.prepare?.transaction) {
+      try {
+        const sendResp = await signAndSendSolanaTxWithPrivy({
+          userPrivyId,
+          walletAddress: userWalletAddress,
+          transactionBase64: result.prepare.transaction
+        });
+        return res.status(200).json({
+          success: true,
+          mintAddress: result.prepare.mintAddress,
+          poolAddress: result.prepare.poolAddress,
+          transactionSignature: sendResp?.signature || sendResp?.txSignature || null,
+          solscanUrl: sendResp?.signature ? `https://solscan.io/tx/${sendResp.signature}` : undefined
+        });
+      } catch (e) {
+        console.error('Privy session send failed:', e);
+        // Fall back to returning prepared tx for client-side signing
+        return res.status(200).json(result);
+      }
+    }
 
     if (result.success) {
       res.status(200).json(result);
@@ -232,7 +256,9 @@ app.post('/api/launch-token-json', async (req, res) => {
     const { 
       metadata,
       userId,
-      userWalletAddress // Privy wallet address
+      userWalletAddress,
+      userPrivyId,
+      sessionMode
     } = req.body;
 
     // Validate required fields
@@ -252,6 +278,26 @@ app.post('/api/launch-token-json', async (req, res) => {
 
     // Prepare transaction
     const result = await launchTokenDBC(metadata, userId, null, { prepareOnly: true, userWalletAddress });
+
+    if (sessionMode && result?.success && result.prepare?.transaction) {
+      try {
+        const sendResp = await signAndSendSolanaTxWithPrivy({
+          userPrivyId,
+          walletAddress: userWalletAddress,
+          transactionBase64: result.prepare.transaction
+        });
+        return res.status(200).json({
+          success: true,
+          mintAddress: result.prepare.mintAddress,
+          poolAddress: result.prepare.poolAddress,
+          transactionSignature: sendResp?.signature || sendResp?.txSignature || null,
+          solscanUrl: sendResp?.signature ? `https://solscan.io/tx/${sendResp.signature}` : undefined
+        });
+      } catch (e) {
+        console.error('Privy session send failed:', e);
+        return res.status(200).json(result);
+      }
+    }
 
     if (result.success) {
       res.status(200).json(result);
