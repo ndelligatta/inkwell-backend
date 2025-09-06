@@ -102,7 +102,7 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       twitter, 
       initialBuyAmount,
       userId,
-      userPrivateKey // Dev wallet private key
+      userWalletAddress // Privy wallet public key (fee payer)
     } = req.body;
 
     // Validate required fields
@@ -113,12 +113,11 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       });
     }
 
-    // Require user's Privy embedded wallet private key explicitly
-    const privateKey = userPrivateKey;
-    if (!privateKey) {
+    // Prepare-only flow: require user's wallet address to set fee payer (Privy signs client-side)
+    if (!userWalletAddress) {
       return res.status(400).json({
         success: false,
-        error: 'Missing userPrivateKey. Please export your Privy embedded wallet (Settings → Privy Wallets → View Private Key) and provide it to launch the token.'
+        error: 'userWalletAddress is required. This endpoint prepares a transaction for the user to sign via Privy.'
       });
     }
 
@@ -145,8 +144,8 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       metadata.imageType = req.body.imageType || 'image/png';
     }
 
-    // Launch token
-    const result = await launchTokenDBC(metadata, userId, privateKey);
+    // Prepare transaction for frontend Privy signing
+    const result = await launchTokenDBC(metadata, userId, null, { prepareOnly: true, userWalletAddress });
 
     if (result.success) {
       res.status(200).json(result);
@@ -233,7 +232,7 @@ app.post('/api/launch-token-json', async (req, res) => {
     const { 
       metadata,
       userId,
-      userPrivateKey // Dev wallet private key
+      userWalletAddress // Privy wallet address
     } = req.body;
 
     // Validate required fields
@@ -244,17 +243,15 @@ app.post('/api/launch-token-json', async (req, res) => {
       });
     }
 
-    // Require user's Privy embedded wallet private key explicitly
-    const privateKey = userPrivateKey;
-    if (!privateKey) {
+    if (!userWalletAddress) {
       return res.status(400).json({
         success: false,
-        error: 'Missing userPrivateKey. Please export your Privy embedded wallet (Settings → Privy Wallets → View Private Key) and provide it to launch the token.'
+        error: 'userWalletAddress is required. This endpoint prepares a transaction for the user to sign via Privy.'
       });
     }
 
-    // Launch token
-    const result = await launchTokenDBC(metadata, userId, privateKey);
+    // Prepare transaction
+    const result = await launchTokenDBC(metadata, userId, null, { prepareOnly: true, userWalletAddress });
 
     if (result.success) {
       res.status(200).json(result);

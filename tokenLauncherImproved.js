@@ -386,7 +386,7 @@ async function uploadMetadata(metadata, mintAddress) {
   throw lastError || new Error('Failed to upload metadata after all attempts');
 }
 
-async function launchTokenDBC(metadata, userId, userPrivateKey) {
+async function launchTokenDBC(metadata, userId, userPrivateKey, opts = {}) {
   // Validate inputs
   const validationErrors = validateMetadata(metadata);
   if (validationErrors.length > 0) {
@@ -406,6 +406,7 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
   let connection;
   let dbcClient;
   let userKeypair;
+  let userPublicKey;
   let baseMintKP;
   
   try {
@@ -452,12 +453,21 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
     console.log('Creating DBC client with connection to:', connection.rpcEndpoint);
     dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     
-    // Parse private key
-    userKeypair = parsePrivateKey(userPrivateKey);
-    console.log('User wallet:', userKeypair.publicKey.toString());
+    // Determine signing mode
+    const prepareOnly = opts?.prepareOnly === true;
+    if (prepareOnly) {
+      if (!opts?.userWalletAddress) throw new Error('userWalletAddress is required for prepare-only mode');
+      userPublicKey = new PublicKey(opts.userWalletAddress);
+      console.log('Prepare-only mode. User wallet:', userPublicKey.toString());
+    } else {
+      // Parse private key
+      userKeypair = parsePrivateKey(userPrivateKey);
+      userPublicKey = userKeypair.publicKey;
+      console.log('User wallet:', userPublicKey.toString());
+    }
     
     // Check wallet balance
-    const balance = await connection.getBalance(userKeypair.publicKey);
+    const balance = await connection.getBalance(userPublicKey);
     const requiredBalance = 0.02 * 1e9; // 0.02 SOL for fees and rent
     
     if (balance < requiredBalance) {
@@ -545,11 +555,11 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
             name: metadata.name.substring(0, 32),
             symbol: metadata.symbol.substring(0, 10),
             uri: metadataUri,
-            payer: userKeypair.publicKey,
-            poolCreator: userKeypair.publicKey,
+            payer: userPublicKey,
+            poolCreator: userPublicKey,
           },
           firstBuyParam: {
-            buyer: userKeypair.publicKey,
+            buyer: userPublicKey,
             buyAmount: new BN(Math.floor(metadata.initialBuyAmount * 1e9)), // Convert SOL to lamports
             minimumAmountOut: new BN(1), // Accept any amount
             referralTokenAccount: null,
@@ -570,8 +580,8 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
           name: metadata.name.substring(0, 32),
           symbol: metadata.symbol.substring(0, 10),
           uri: metadataUri,
-          payer: userKeypair.publicKey,
-          poolCreator: userKeypair.publicKey,
+          payer: userPublicKey,
+          poolCreator: userPublicKey,
         });
         
         poolTransactionInstructions = createPoolTx.instructions;
@@ -587,8 +597,8 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
         name: metadata.name.substring(0, 32),
         symbol: metadata.symbol.substring(0, 10),
         uri: metadataUri,
-        payer: userKeypair.publicKey,
-        poolCreator: userKeypair.publicKey,
+        payer: userPublicKey,
+        poolCreator: userPublicKey,
       });
       
       poolTransactionInstructions = createPoolTx.instructions;
@@ -638,11 +648,26 @@ async function launchTokenDBC(metadata, userId, userPrivateKey) {
       transaction.add(...buyTransactionInstructions);
       console.log('✅ Initial buy bundled atomically with pool creation');
     }
-    transaction.feePayer = userKeypair.publicKey;
+    transaction.feePayer = userPublicKey;
     transaction.recentBlockhash = blockhash;
     
-    
-    // Sign with both keypairs
+    if (prepareOnly) {
+      // Partially sign with base mint only; frontend (Privy) will co-sign and send
+      transaction.partialSign(baseMintKP);
+      const serialized = transaction.serialize({ requireAllSignatures: false });
+      return {
+        success: true,
+        prepare: {
+          transaction: serialized.toString('base64'),
+          mintAddress: baseMintKP.publicKey.toString(),
+          poolAddress,
+          blockhash,
+          lastValidBlockHeight
+        }
+      };
+    }
+
+    // Sign with both keypairs (legacy path)
     transaction.sign(userKeypair, baseMintKP);
     
     // Send transaction with retry logic
