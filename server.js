@@ -599,6 +599,52 @@ app.post('/api/claim-creator-fees', async (req, res) => {
   }
 });
 
+// PARTY TOKEN ADMIN CLAIM - STANDALONE ENDPOINT - EXACT REPLICA
+app.post('/api/party-admin-fee-claim', async (req, res) => {
+  try {
+    console.log('====== PARTY ADMIN FEE CLAIM ENDPOINT ======');
+    
+    // HARDCODED PARTY POOL ADDRESS - ONLY THIS ONE!!!
+    const PARTY_POOL_ADDRESS = 'G91itYzrXSenm1LqA4XS292reHmZPDDekRTJBMYMb9LV';
+    
+    // Use admin private key from environment
+    const adminPrivateKey = process.env.dev_private_key;
+    if (!adminPrivateKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Admin private key not configured in environment'
+      });
+    }
+    
+    console.log('Using admin wallet for PARTY token claim...');
+    console.log('PARTY Pool Address:', PARTY_POOL_ADDRESS);
+    
+    // Call the same claimCreatorFees function with hardcoded values
+    const result = await claimCreatorFees(PARTY_POOL_ADDRESS, adminPrivateKey, 'admin-party-claim');
+    
+    console.log('PARTY claim result:', result.success ? 'SUCCESS' : 'FAILED');
+    if (!result.success) {
+      console.error('PARTY claim failed:', result.error);
+    }
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(500).json(result);
+    }
+    
+  } catch (error) {
+    console.error('====== ERROR IN PARTY ADMIN CLAIM ENDPOINT ======');
+    console.error('Error:', error);
+    console.error('Stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error',
+      details: error.toString()
+    });
+  }
+});
+
 // Claim all creator fees for a user
 app.post('/api/claim-all-creator-fees', async (req, res) => {
   try {
