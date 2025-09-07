@@ -52,6 +52,25 @@ const PORT = process.env.PORT || 3001;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_RPC = HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}` : null;
 
+// Helper: create a Helius connection and verify blockhash with simple retry
+async function getHeliusConnectionOrThrow() {
+  if (!HELIUS_RPC) throw new Error('HELIUS_API_KEY not configured');
+  const { Connection } = require('@solana/web3.js');
+  const connection = new Connection(HELIUS_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+  const maxRetries = 3;
+  let lastErr;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await connection.getLatestBlockhash('confirmed');
+      return connection;
+    } catch (e) {
+      lastErr = e;
+      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw new Error(`Helius RPC unavailable: ${lastErr?.message || lastErr}`);
+}
+
 // CORS configuration - allow specific origins
 const corsOptions = {
   origin: function (origin, callback) {
@@ -643,12 +662,12 @@ app.post('/api/claim-creator-fees', async (req, res) => {
 
     // Broadcast mode (client provided a signed tx)
     if (signedTxBase64) {
-      if (!HELIUS_RPC) {
-        return res.status(500).json({ success: false, error: 'HELIUS_API_KEY not configured' });
+      let connection;
+      try {
+        connection = await getHeliusConnectionOrThrow();
+      } catch (e) {
+        return res.status(502).json({ success: false, error: e.message || 'Helius RPC unavailable' });
       }
-      const { Connection } = require('@solana/web3.js');
-      const connection = new Connection(HELIUS_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
-      await connection.getLatestBlockhash('confirmed');
       const broadcast = await broadcastSignedClaimTx({ connection, supabaseClient: supabaseAdmin, poolAddress, userId, signedTxBase64 });
       return res.status(200).json({ success: true, transactionSignature: broadcast.signature, solscanUrl: `https://solscan.io/tx/${broadcast.signature}` });
     }
@@ -671,13 +690,13 @@ app.post('/api/claim-creator-fees', async (req, res) => {
       return res.status(400).json({ success: false, error: 'User wallet not found' });
     }
 
-    if (!HELIUS_RPC) {
-      return res.status(500).json({ success: false, error: 'HELIUS_API_KEY not configured' });
+    let connection;
+    try {
+      connection = await getHeliusConnectionOrThrow();
+    } catch (e) {
+      return res.status(502).json({ success: false, error: e.message || 'Helius RPC unavailable' });
     }
-    const { Connection } = require('@solana/web3.js');
     const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
-    const connection = new Connection(HELIUS_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
-    await connection.getLatestBlockhash('confirmed');
     const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
 
     const { PublicKey } = require('@solana/web3.js');
@@ -774,6 +793,35 @@ app.get('/api/creator-fees/:poolAddress', async (req, res) => {
       success: false,
       error: error.message || 'Internal server error'
     });
+  }
+});
+
+// Admin: one-off claim with ADMIN_PRIVATE_KEY for a single pool
+app.post('/api/admin/claim-creator-fees-once', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth || auth !== `Bearer ${process.env.ADMIN_AUTH_TOKEN || 'admin-secret'}`) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    const { poolAddress } = req.body || {};
+    if (!poolAddress) {
+      return res.status(400).json({ success: false, error: 'poolAddress is required' });
+    }
+    // Optional: lock to known address
+    const ALLOWED_POOL = 'BN222kCqHc7bcjqAqE2Q69vRVFSAKKapUGiqDmXpq5Ud';
+    if (poolAddress !== ALLOWED_POOL) {
+      return res.status(403).json({ success: false, error: 'Pool not allowed for this one-off endpoint' });
+    }
+    const adminKey = process.env.ADMIN_PRIVATE_KEY;
+    if (!adminKey) {
+      return res.status(500).json({ success: false, error: 'ADMIN_PRIVATE_KEY not configured' });
+    }
+    const result = await claimCreatorFees(poolAddress, adminKey, 'admin');
+    const code = result.success ? 200 : 500;
+    return res.status(code).json(result);
+  } catch (err) {
+    console.error('Admin one-off claim error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Internal error' });
   }
 });
 
