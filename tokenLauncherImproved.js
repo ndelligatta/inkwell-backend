@@ -1086,31 +1086,28 @@ async function prepareLaunchTokenTransaction(metadata, userId, userWalletAddress
           createPoolParam: {
             baseMint: tokenMint,
             config: configAddress,
-            name: metadata.name,
-            symbol: metadata.symbol,
+            name: (metadata.name || '').substring(0, 32),
+            symbol: (metadata.symbol || '').substring(0, 10),
             uri: metadataUri,
             payer: ownerPubkey,
             poolCreator: ownerPubkey,
           },
-          swapBuyParam: {
-            owner: ownerPubkey,
-            pool: new PublicKey(poolAddress),
-            amountIn: new BN(Math.floor(metadata.initialBuyAmount * 1e9)),
-            minimumAmountOut: new BN(0),
-            swapBaseForQuote: false,
+          firstBuyParam: {
+            buyer: ownerPubkey,
+            buyAmount: new BN(Math.floor(metadata.initialBuyAmount * 1e9)),
+            minimumAmountOut: new BN(1),
             referralTokenAccount: null,
-            payer: ownerPubkey,
           },
         });
         poolInstructions = createPoolTx.instructions;
-        buyInstructions = swapBuyTx.instructions;
+        if (swapBuyTx) buyInstructions = swapBuyTx.instructions;
       } catch (e) {
         // Fallback to createPool only
         const createPoolTx = await dbcClient.pool.createPool({
           baseMint: tokenMint,
           config: configAddress,
-          name: metadata.name,
-          symbol: metadata.symbol,
+          name: (metadata.name || '').substring(0, 32),
+          symbol: (metadata.symbol || '').substring(0, 10),
           uri: metadataUri,
           payer: ownerPubkey,
           poolCreator: ownerPubkey,
@@ -1131,8 +1128,8 @@ async function prepareLaunchTokenTransaction(metadata, userId, userWalletAddress
     }
 
     // Compose final transaction
-    const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 150000 });
-    const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 });
+    const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500000 });
+    const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 800000 });
     const tx = new Transaction();
     tx.add(priorityFeeIx);
     tx.add(computeLimitIx);
