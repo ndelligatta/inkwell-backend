@@ -1000,10 +1000,220 @@ async function getUserDevWallet(userId) {
   }
 }
 
+// Exported functions
 module.exports = {
   launchTokenDBC,
   getUserDevWallet,
   uploadMetadata,
   validateMetadata,
-  parsePrivateKey
+  parsePrivateKey,
+  prepareLaunchTokenTransaction,
+  broadcastSignedTransaction
 };
+
+// Prepare a transaction for client-side signing with Privy
+async function prepareLaunchTokenTransaction(metadata, userId, userWalletAddress) {
+  // Validate inputs
+  const validationErrors = validateMetadata(metadata);
+  if (validationErrors.length > 0) {
+    return {
+      success: false,
+      error: `Validation failed: ${validationErrors.join(', ')}`
+    };
+  }
+  if (!userId || !userWalletAddress) {
+    return { success: false, error: 'userId and userWalletAddress are required' };
+  }
+
+  let connection;
+  let dbcClient;
+  let baseMintKP;
+  try {
+    // Initialize connection (prefer Helius)
+    try {
+      connection = new Connection(RPC_URL, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+      await connection.getLatestBlockhash();
+    } catch (heliusError) {
+      connection = new Connection(FALLBACK_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+      await connection.getLatestBlockhash();
+    }
+
+    dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+
+    const ownerPubkey = new PublicKey(userWalletAddress);
+
+    // Optional: quick balance check (advisory only)
+    try {
+      const bal = await connection.getBalance(ownerPubkey);
+      if (bal < 0.02 * 1e9) {
+        console.warn('Low balance for user wallet; tx may fail due to fees');
+      }
+    } catch {}
+
+    // Obtain base mint keypair (prefer vanity pool; fallback to random)
+    try {
+      const { data: keypairData } = await supabase
+        .from('keypairs')
+        .select('*')
+        .eq('has_vanity_suffix', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single();
+      if (keypairData?.private_key) {
+        baseMintKP = parsePrivateKey(keypairData.private_key);
+      } else {
+        baseMintKP = Keypair.generate();
+      }
+    } catch {
+      baseMintKP = Keypair.generate();
+    }
+
+    const tokenMint = baseMintKP.publicKey;
+    // Upload metadata first (mirrors server flow)
+    const metadataUri = await uploadMetadata(metadata, tokenMint.toString());
+
+    // Build pool creation (prefer atomic with initial buy)
+    let poolInstructions = [];
+    let buyInstructions = [];
+    let poolAddress;
+
+    const configAddress = INKWELL_CONFIG_ADDRESS;
+    poolAddress = deriveDbcPoolAddress(NATIVE_MINT, tokenMint, configAddress).toString();
+
+    if (metadata.initialBuyAmount && metadata.initialBuyAmount > 0) {
+      try {
+        const { createPoolTx, swapBuyTx } = await dbcClient.pool.createPoolWithFirstBuy({
+          createPoolParam: {
+            baseMint: tokenMint,
+            config: configAddress,
+            name: metadata.name,
+            symbol: metadata.symbol,
+            uri: metadataUri,
+            payer: ownerPubkey,
+            poolCreator: ownerPubkey,
+          },
+          swapBuyParam: {
+            owner: ownerPubkey,
+            pool: new PublicKey(poolAddress),
+            amountIn: new BN(Math.floor(metadata.initialBuyAmount * 1e9)),
+            minimumAmountOut: new BN(0),
+            swapBaseForQuote: false,
+            referralTokenAccount: null,
+            payer: ownerPubkey,
+          },
+        });
+        poolInstructions = createPoolTx.instructions;
+        buyInstructions = swapBuyTx.instructions;
+      } catch (e) {
+        // Fallback to createPool only
+        const createPoolTx = await dbcClient.pool.createPool({
+          baseMint: tokenMint,
+          config: configAddress,
+          name: metadata.name,
+          symbol: metadata.symbol,
+          uri: metadataUri,
+          payer: ownerPubkey,
+          poolCreator: ownerPubkey,
+        });
+        poolInstructions = createPoolTx.instructions;
+      }
+    } else {
+      const createPoolTx = await dbcClient.pool.createPool({
+        baseMint: tokenMint,
+        config: configAddress,
+        name: metadata.name,
+        symbol: metadata.symbol,
+        uri: metadataUri,
+        payer: ownerPubkey,
+        poolCreator: ownerPubkey,
+      });
+      poolInstructions = createPoolTx.instructions;
+    }
+
+    // Compose final transaction
+    const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 150000 });
+    const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 });
+    const tx = new Transaction();
+    tx.add(priorityFeeIx);
+    tx.add(computeLimitIx);
+    tx.add(...poolInstructions);
+    if (buyInstructions.length > 0) tx.add(...buyInstructions);
+    tx.feePayer = new PublicKey(userWalletAddress);
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+
+    // Partial sign with base mint keypair only
+    tx.partialSign(baseMintKP);
+
+    const serialized = tx.serialize({ requireAllSignatures: false });
+
+    return {
+      success: true,
+      transactionBase64: serialized.toString('base64'),
+      mintAddress: tokenMint.toString(),
+      poolAddress,
+      blockhash,
+      lastValidBlockHeight
+    };
+  } catch (error) {
+    console.error('Error preparing launch transaction:', error);
+    return { success: false, error: error.message || 'Failed to prepare transaction' };
+  }
+}
+
+// Broadcast a fully signed transaction and log results
+async function broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress }) {
+  try {
+    if (!signedTxBase64 || !userId || !mintAddress || !poolAddress) {
+      return { success: false, error: 'signedTxBase64, userId, mintAddress, and poolAddress are required' };
+    }
+    let connection;
+    try {
+      connection = new Connection(RPC_URL, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+      await connection.getLatestBlockhash();
+    } catch {
+      connection = new Connection(FALLBACK_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+    }
+    const tx = Transaction.from(Buffer.from(signedTxBase64, 'base64'));
+    const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+    await connection.confirmTransaction(signature, 'confirmed');
+
+    // Log to Supabase (minimal)
+    try {
+      await supabase.from('token_launches').insert({
+        user_id: userId,
+        token_mint: mintAddress,
+        pool_address: poolAddress,
+        config_address: INKWELL_CONFIG_ADDRESS.toString(),
+        transaction_signature: signature,
+        launch_type: 'dbc',
+        initial_buy_amount: null
+      });
+      await supabase.from('token_pools').insert({
+        pool_address: poolAddress,
+        token_mint: mintAddress,
+        config_address: INKWELL_CONFIG_ADDRESS.toString(),
+        user_id: userId,
+        status: 'active',
+        pool_type: 'dbc',
+        initial_supply: '1000000000',
+        curve_type: 'exponential',
+        buy_fee_bps: 400,
+        sell_fee_bps: 400,
+        migration_threshold: 20,
+        metadata: { launch_transaction: signature }
+      });
+    } catch (logErr) {
+      console.warn('Logging to Supabase failed:', logErr.message);
+    }
+
+    return {
+      success: true,
+      transactionSignature: signature,
+      solscanUrl: `https://solscan.io/tx/${signature}`
+    };
+  } catch (error) {
+    console.error('Error broadcasting signed transaction:', error);
+    return { success: false, error: error.message || 'Failed to broadcast transaction' };
+  }
+}

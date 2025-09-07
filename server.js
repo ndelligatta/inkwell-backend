@@ -12,7 +12,13 @@ const cors = require('cors');
 const multer = require('multer');
 
 // Import AFTER dotenv is loaded
-const { launchTokenDBC, getUserDevWallet, validateMetadata } = require('./tokenLauncherImproved');
+const { 
+  launchTokenDBC, 
+  getUserDevWallet, 
+  validateMetadata,
+  prepareLaunchTokenTransaction,
+  broadcastSignedTransaction
+} = require('./tokenLauncherImproved');
 const { createInkwellConfig } = require('./createConfig');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
@@ -163,6 +169,58 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       success: false,
       error: error.message || 'Internal server error'
     });
+  }
+});
+
+// Prepare a transaction for client-side signing with Privy
+app.post('/api/launch-token/prepare', upload.single('image'), async (req, res) => {
+  try {
+    const { 
+      name, symbol, description, website, twitter, initialBuyAmount,
+      userId, walletAddress
+    } = req.body;
+
+    if (!name || !symbol || !userId || !walletAddress) {
+      return res.status(400).json({ success: false, error: 'name, symbol, userId, and walletAddress are required' });
+    }
+
+    const metadata = {
+      name: name.trim(),
+      symbol: symbol.trim(),
+      description: description?.trim() || '',
+      website: website?.trim() || undefined,
+      twitter: twitter?.trim() || 'https://x.com/blockpartysol',
+      initialBuyAmount: parseFloat(initialBuyAmount) || 0.01
+    };
+
+    // Handle image (optional)
+    if (req.file) {
+      metadata.image = req.file.buffer.toString('base64');
+      metadata.imageType = req.file.mimetype;
+    } else if (req.body.imageBase64) {
+      metadata.image = req.body.imageBase64;
+      metadata.imageType = req.body.imageType || 'image/png';
+    }
+
+    const result = await prepareLaunchTokenTransaction(metadata, userId, walletAddress);
+    const status = result.success ? 200 : 400;
+    res.status(status).json(result);
+  } catch (error) {
+    console.error('Error in /api/launch-token/prepare:', error);
+    res.status(500).json({ success: false, error: error.message || 'Internal server error' });
+  }
+});
+
+// Broadcast a fully-signed transaction produced by the client (Privy)
+app.post('/api/launch-token/broadcast', async (req, res) => {
+  try {
+    const { signedTxBase64, userId, mintAddress, poolAddress } = req.body;
+    const result = await broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress });
+    const status = result.success ? 200 : 400;
+    res.status(status).json(result);
+  } catch (error) {
+    console.error('Error in /api/launch-token/broadcast:', error);
+    res.status(500).json({ success: false, error: error.message || 'Internal server error' });
   }
 });
 
