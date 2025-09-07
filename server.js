@@ -808,7 +808,7 @@ app.post('/api/admin/claim-creator-fees-once', async (req, res) => {
       return res.status(400).json({ success: false, error: 'poolAddress is required' });
     }
     // Optional: lock to known address
-    const ALLOWED_POOL = 'BN222kCqHc7bcjqAqE2Q69vRVFSAKKapUGiqDmXpq5Ud';
+    const ALLOWED_POOL = 'G91itYzrXSenm1LqA4XS292reHmZPDDekRTJBMYMb9LV';
     if (poolAddress !== ALLOWED_POOL) {
       return res.status(403).json({ success: false, error: 'Pool not allowed for this one-off endpoint' });
     }
