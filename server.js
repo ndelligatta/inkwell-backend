@@ -48,6 +48,9 @@ try {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+// Strict Helius RPC for fee-claim flows
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+const HELIUS_RPC = HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}` : null;
 
 // CORS configuration - allow specific origins
 const corsOptions = {
@@ -640,15 +643,12 @@ app.post('/api/claim-creator-fees', async (req, res) => {
 
     // Broadcast mode (client provided a signed tx)
     if (signedTxBase64) {
-      let connection;
-      try {
-        const { Connection } = require('@solana/web3.js');
-        connection = new Connection(RPC_URL, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
-        await connection.getLatestBlockhash('confirmed');
-      } catch {
-        const { Connection } = require('@solana/web3.js');
-        connection = new Connection(FALLBACK_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+      if (!HELIUS_RPC) {
+        return res.status(500).json({ success: false, error: 'HELIUS_API_KEY not configured' });
       }
+      const { Connection } = require('@solana/web3.js');
+      const connection = new Connection(HELIUS_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+      await connection.getLatestBlockhash('confirmed');
       const broadcast = await broadcastSignedClaimTx({ connection, supabaseClient: supabaseAdmin, poolAddress, userId, signedTxBase64 });
       return res.status(200).json({ success: true, transactionSignature: broadcast.signature, solscanUrl: `https://solscan.io/tx/${broadcast.signature}` });
     }
@@ -671,21 +671,14 @@ app.post('/api/claim-creator-fees', async (req, res) => {
       return res.status(400).json({ success: false, error: 'User wallet not found' });
     }
 
-    let connection;
-    let dbcClient;
-    try {
-      const { Connection } = require('@solana/web3.js');
-      const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
-      connection = new Connection(RPC_URL, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
-      await connection.getLatestBlockhash('confirmed');
-      dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
-    } catch (e) {
-      const { Connection } = require('@solana/web3.js');
-      const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
-      connection = new Connection(FALLBACK_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
-      await connection.getLatestBlockhash('confirmed');
-      dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+    if (!HELIUS_RPC) {
+      return res.status(500).json({ success: false, error: 'HELIUS_API_KEY not configured' });
     }
+    const { Connection } = require('@solana/web3.js');
+    const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
+    const connection = new Connection(HELIUS_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+    await connection.getLatestBlockhash('confirmed');
+    const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
 
     const { PublicKey } = require('@solana/web3.js');
     const poolPubkey = new PublicKey(poolAddress);
