@@ -263,6 +263,93 @@ async function claimAllDammV2Positions(migratedPoolAddress, creatorKeypair, conn
   }
 }
 
+// Prepare an unsigned claim transaction for DBC (non-migrated) using the user's wallet (Privy)
+async function prepareCreatorClaimTxDBC({ connection, dbcClient, poolPubkey, userWalletPubkey, feeMetrics }) {
+  const claimTx = await dbcClient.creator.claimCreatorTradingFee({
+    creator: userWalletPubkey,
+    pool: poolPubkey,
+    maxBaseAmount: feeMetrics.current.creatorBaseFee,
+    maxQuoteAmount: feeMetrics.current.creatorQuoteFee,
+    payer: userWalletPubkey,
+  });
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  claimTx.feePayer = userWalletPubkey;
+  claimTx.recentBlockhash = blockhash;
+  return claimTx;
+}
+
+// Prepare unsigned claim transactions for DAMM v2 positions using the user's wallet (Privy)
+async function prepareCreatorClaimTxDammV2({ connection, migratedPoolAddress, userWalletPubkey }) {
+  const cpAmm = new CpAmm(connection);
+  const poolPubkey = new PublicKey(migratedPoolAddress);
+  const poolState = await cpAmm.fetchPoolState(poolPubkey);
+  const userPositions = await cpAmm.getUserPositionByPool(poolPubkey, userWalletPubkey);
+  if (!userPositions || userPositions.length === 0) {
+    return [];
+  }
+  function getTokenProgram(tokenFlag) {
+    return tokenFlag === 1 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+  }
+  const txs = [];
+  for (const position of userPositions) {
+    const claimTx = await cpAmm.claimPositionFee2({
+      receiver: userWalletPubkey,
+      owner: userWalletPubkey,
+      pool: poolPubkey,
+      position: position.position,
+      positionNftAccount: position.positionNftAccount,
+      tokenAVault: poolState.tokenAVault,
+      tokenBVault: poolState.tokenBVault,
+      tokenAMint: poolState.tokenAMint,
+      tokenBMint: poolState.tokenBMint,
+      tokenAProgram: getTokenProgram(poolState.tokenAFlag),
+      tokenBProgram: getTokenProgram(poolState.tokenBFlag),
+      feePayer: userWalletPubkey,
+    });
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
+    claimTx.feePayer = userWalletPubkey;
+    claimTx.recentBlockhash = blockhash;
+    txs.push(claimTx);
+  }
+  return txs;
+}
+
+// Broadcast a signed transaction and log results (single tx)
+async function broadcastSignedClaimTx({ connection, supabaseClient, poolAddress, userId, signedTxBase64 }) {
+  const txBuffer = Buffer.from(signedTxBase64, 'base64');
+  const { Transaction } = require('@solana/web3.js');
+  const tx = Transaction.from(txBuffer);
+  const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+  await connection.confirmTransaction(signature, 'confirmed');
+  // Best-effort DB logging (no amount calculation here as fees now zero post-claim)
+  if (supabaseClient) {
+    try {
+      const { data: post } = await supabaseClient
+        .from('user_posts')
+        .select('id')
+        .eq('pool_address', poolAddress)
+        .single();
+      if (post) {
+        await supabaseClient
+          .from('post_fee_claim_history')
+          .insert({
+            post_id: post.id,
+            pool_address: poolAddress,
+            base_fees_claimed: 0,
+            quote_fees_claimed: 0,
+            sol_amount: 0,
+            transaction_signature: signature,
+            claimer_address: tx.feePayer?.toString() || null,
+            success: true
+          });
+      }
+    } catch (e) {
+      // ignore logging errors
+    }
+  }
+  return { signature };
+}
+
 // Claim fees from a single pool
 async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
   try {
@@ -777,5 +864,10 @@ async function checkAvailableCreatorFees(poolAddress) {
 module.exports = {
   claimCreatorFees,
   claimAllCreatorFees,
-  checkAvailableCreatorFees
+  checkAvailableCreatorFees,
+  prepareCreatorClaimTxDBC,
+  prepareCreatorClaimTxDammV2,
+  checkPoolMigrationOfficial,
+  getMigratedPoolAddress,
+  broadcastSignedClaimTx
 };

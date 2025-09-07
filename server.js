@@ -21,7 +21,16 @@ const {
 } = require('./tokenLauncherImproved');
 const { createInkwellConfig } = require('./createConfig');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
-const { claimCreatorFees, claimAllCreatorFees, checkAvailableCreatorFees } = require('./claimCreatorFees');
+const { 
+  claimCreatorFees, 
+  claimAllCreatorFees, 
+  checkAvailableCreatorFees,
+  prepareCreatorClaimTxDBC,
+  prepareCreatorClaimTxDammV2,
+  checkPoolMigrationOfficial,
+  getMigratedPoolAddress,
+  broadcastSignedClaimTx
+} = require('./claimCreatorFees');
 const { getLifetimeFees, updateAllPoolsLifetimeFees } = require('./getLifetimeFees');
 const { updateUserLifetimeFees, updateAllUsersLifetimeFees } = require('./updateUserLifetimeFees');
 const authRoutes = require('./routes/auth');
@@ -620,40 +629,99 @@ app.get('/api/health/rpc', async (req, res) => {
 app.post('/api/claim-creator-fees', async (req, res) => {
   try {
     console.log('====== CLAIM CREATOR FEES ENDPOINT ======');
-    console.log('Request body:', { ...req.body, creatorPrivateKey: req.body.creatorPrivateKey ? 'HIDDEN' : 'NOT PROVIDED' });
-    
-    const { poolAddress, userId, creatorPrivateKey } = req.body;
-    
-    if (!poolAddress || !userId || !creatorPrivateKey) {
-      return res.status(400).json({
-        success: false,
-        error: 'Pool address, user ID, and creator private key are required'
-      });
+    const { poolAddress, userId, creatorPrivateKey, signedTxBase64 } = req.body;
+    if (!poolAddress || !userId) {
+      return res.status(400).json({ success: false, error: 'Pool address and user ID are required' });
     }
-    
-    console.log('Starting creator fee claim process...');
-    const result = await claimCreatorFees(poolAddress, creatorPrivateKey, userId);
-    
-    console.log('Claim result:', result.success ? 'SUCCESS' : 'FAILED');
-    if (!result.success) {
-      console.error('Claim failed:', result.error);
+
+    // Initialize Supabase (for DB lookup and logging)
+    const { createClient } = require('@supabase/supabase-js');
+    const supabaseAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+
+    // Broadcast mode (client provided a signed tx)
+    if (signedTxBase64) {
+      let connection;
+      try {
+        const { Connection } = require('@solana/web3.js');
+        connection = new Connection(RPC_URL, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+        await connection.getLatestBlockhash('confirmed');
+      } catch {
+        const { Connection } = require('@solana/web3.js');
+        connection = new Connection(FALLBACK_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+      }
+      const broadcast = await broadcastSignedClaimTx({ connection, supabaseClient: supabaseAdmin, poolAddress, userId, signedTxBase64 });
+      return res.status(200).json({ success: true, transactionSignature: broadcast.signature, solscanUrl: `https://solscan.io/tx/${broadcast.signature}` });
     }
-    
-    if (result.success) {
-      res.status(200).json(result);
-    } else {
-      res.status(500).json(result);
+
+    // Legacy mode (temporary support) if private key provided
+    if (creatorPrivateKey) {
+      const legacy = await claimCreatorFees(poolAddress, creatorPrivateKey, userId);
+      const code = legacy.success ? 200 : 500;
+      return res.status(code).json(legacy);
     }
-    
+
+    // Prepare mode: build unsigned tx for user to sign with Privy
+    // Lookup user's Privy wallet address from DB
+    const { data: userRow, error: userErr } = await supabaseAdmin
+      .from('users')
+      .select('wallet_address')
+      .eq('id', userId)
+      .single();
+    if (userErr || !userRow?.wallet_address) {
+      return res.status(400).json({ success: false, error: 'User wallet not found' });
+    }
+
+    let connection;
+    let dbcClient;
+    try {
+      const { Connection } = require('@solana/web3.js');
+      const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
+      connection = new Connection(RPC_URL, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+      await connection.getLatestBlockhash('confirmed');
+      dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+    } catch (e) {
+      const { Connection } = require('@solana/web3.js');
+      const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
+      connection = new Connection(FALLBACK_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+      await connection.getLatestBlockhash('confirmed');
+      dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+    }
+
+    const { PublicKey } = require('@solana/web3.js');
+    const poolPubkey = new PublicKey(poolAddress);
+    const userWalletPubkey = new PublicKey(userRow.wallet_address);
+
+    // Check fee metrics and migration
+    let feeMetrics;
+    try {
+      feeMetrics = await dbcClient.state.getPoolFeeMetrics(poolPubkey);
+    } catch (e) {
+      feeMetrics = null;
+    }
+
+    if (feeMetrics && feeMetrics.current && (!feeMetrics.current.creatorBaseFee.isZero() || !feeMetrics.current.creatorQuoteFee.isZero())) {
+      const tx = await prepareCreatorClaimTxDBC({ connection, dbcClient, poolPubkey, userWalletPubkey, feeMetrics });
+      const txBase64 = tx.serialize({ requireAllSignatures: false }).toString('base64');
+      return res.status(200).json({ success: true, needsSignature: true, transactions: [txBase64] });
+    }
+
+    // If no fees on DBC, check migration to DAMM v2
+    const migration = await checkPoolMigrationOfficial(poolAddress, connection);
+    if (migration.migrated && migration.dammVersion === 'v2') {
+      const migratedPoolAddress = await getMigratedPoolAddress(poolAddress, connection, 'v2');
+      const txs = await prepareCreatorClaimTxDammV2({ connection, migratedPoolAddress: migratedPoolAddress.toString(), userWalletPubkey });
+      if (txs.length === 0) {
+        return res.status(400).json({ success: false, error: 'No positions found to claim' });
+      }
+      const base64s = txs.map(tx => tx.serialize({ requireAllSignatures: false }).toString('base64'));
+      return res.status(200).json({ success: true, needsSignature: true, transactions: base64s, migrated: true, dammVersion: 'v2', newPoolAddress: migratedPoolAddress.toString() });
+    }
+
+    return res.status(400).json({ success: false, error: 'No creator fees available to claim' });
   } catch (error) {
     console.error('====== ERROR IN CREATOR CLAIM ENDPOINT ======');
     console.error('Error:', error);
-    console.error('Stack:', error.stack);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Internal server error',
-      details: error.toString()
-    });
+    res.status(500).json({ success: false, error: error.message || 'Internal server error' });
   }
 });
 
