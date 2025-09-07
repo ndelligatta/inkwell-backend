@@ -812,9 +812,9 @@ app.post('/api/admin/claim-creator-fees-once', async (req, res) => {
     if (poolAddress !== ALLOWED_POOL) {
       return res.status(403).json({ success: false, error: 'Pool not allowed for this one-off endpoint' });
     }
-    const adminKey = process.env.ADMIN_PRIVATE_KEY;
+    const adminKey = process.env.dev_private_key;
     if (!adminKey) {
-      return res.status(500).json({ success: false, error: 'ADMIN_PRIVATE_KEY not configured' });
+      return res.status(500).json({ success: false, error: 'dev_private_key not configured' });
     }
     // Pass through the provided user_id to align DB updates with the creator's records
     const result = await claimCreatorFees(poolAddress, adminKey, user_id || 'admin');
