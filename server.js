@@ -803,7 +803,7 @@ app.post('/api/admin/claim-creator-fees-once', async (req, res) => {
     if (!auth || auth !== `Bearer ${process.env.ADMIN_AUTH_TOKEN || 'admin-secret'}`) {
       return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
-    const { poolAddress } = req.body || {};
+    const { poolAddress, token_mint, config_address, user_id, claim_wallet } = req.body || {};
     if (!poolAddress) {
       return res.status(400).json({ success: false, error: 'poolAddress is required' });
     }
@@ -816,7 +816,10 @@ app.post('/api/admin/claim-creator-fees-once', async (req, res) => {
     if (!adminKey) {
       return res.status(500).json({ success: false, error: 'ADMIN_PRIVATE_KEY not configured' });
     }
-    const result = await claimCreatorFees(poolAddress, adminKey, 'admin');
+    // Pass through the provided user_id to align DB updates with the creator's records
+    const result = await claimCreatorFees(poolAddress, adminKey, user_id || 'admin');
+    // Note: token_mint, config_address, and claim_wallet are accepted for parity with UI payloads
+    // but the underlying claim function derives necessary accounts from on-chain state.
     const code = result.success ? 200 : 500;
     return res.status(code).json(result);
   } catch (err) {
