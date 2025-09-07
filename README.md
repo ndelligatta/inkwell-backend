@@ -1,6 +1,7 @@
 # Inkwell Backend - Token Launch API
 
 Last updated: January 21, 2025
+<!-- Force rebuild: 2025-09-07 -->
 
 This is a Node.js/Express backend that handles token launching using Meteora's Dynamic Bonding Curve SDK. It's designed to replace the Supabase Edge Functions which had compatibility issues with the Solana SDKs.
 
