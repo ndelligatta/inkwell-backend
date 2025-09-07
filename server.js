@@ -31,6 +31,8 @@ const {
   getMigratedPoolAddress,
   broadcastSignedClaimTx
 } = require('./claimCreatorFees');
+const { SystemProgram, LAMPORTS_PER_SOL, Transaction, PublicKey, Keypair } = require('@solana/web3.js');
+const { parsePrivateKey } = require('./tokenLauncherImproved');
 const { getLifetimeFees, updateAllPoolsLifetimeFees } = require('./getLifetimeFees');
 const { updateUserLifetimeFees, updateAllUsersLifetimeFees } = require('./updateUserLifetimeFees');
 const authRoutes = require('./routes/auth');
@@ -825,6 +827,66 @@ app.post('/api/admin/claim-creator-fees-once', async (req, res) => {
   } catch (err) {
     console.error('Admin one-off claim error:', err);
     res.status(500).json({ success: false, error: err.message || 'Internal error' });
+  }
+});
+
+// Giveaway: broadcast launch then send 0.01 SOL to creator from GIVEAWAY_WALLET
+app.post('/api/giveaway/launch-token/broadcast', async (req, res) => {
+  try {
+    const { signedTxBase64, userId, mintAddress, poolAddress } = req.body || {};
+    if (!signedTxBase64 || !userId || !poolAddress) {
+      return res.status(400).json({ success: false, error: 'signedTxBase64, userId, and poolAddress are required' });
+    }
+    let connection;
+    try {
+      connection = await getHeliusConnectionOrThrow();
+    } catch (e) {
+      return res.status(502).json({ success: false, error: e.message || 'Helius RPC unavailable' });
+    }
+    // 1) Broadcast the launch transaction using existing helper
+    const launch = await broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress });
+    if (!launch?.success && !launch?.transactionSignature) {
+      return res.status(500).json({ success: false, error: launch?.error || 'Broadcast failed' });
+    }
+    // 2) Fetch recipient (creator Privy wallet)
+    const supabaseAdmin = require('@supabase/supabase-js').createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data: urow } = await supabaseAdmin
+      .from('users')
+      .select('wallet_address')
+      .eq('id', userId)
+      .single();
+    const recipient = urow?.wallet_address;
+    let bonus = { success: false };
+    // 3) Send bonus if recipient present and funded wallet configured
+    const giveawayKeyRaw = process.env.GIVEAWAY_WALLET;
+    if (recipient && giveawayKeyRaw) {
+      try {
+        const giver = parsePrivateKey(giveawayKeyRaw);
+        const tx = new Transaction().add(SystemProgram.transfer({
+          fromPubkey: giver.publicKey,
+          toPubkey: new PublicKey(recipient),
+          lamports: Math.floor(0.01 * LAMPORTS_PER_SOL),
+        }));
+        tx.feePayer = giver.publicKey;
+        const { blockhash } = await connection.getLatestBlockhash('confirmed');
+        tx.recentBlockhash = blockhash;
+        tx.sign(giver);
+        const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+        await connection.confirmTransaction(sig, 'confirmed');
+        bonus = { success: true, bonusSignature: sig };
+      } catch (e) {
+        bonus = { success: false, error: e.message || String(e) };
+      }
+    }
+    return res.status(200).json({
+      success: true,
+      transactionSignature: launch.transactionSignature,
+      solscanUrl: launch.solscanUrl,
+      bonusTransfer: bonus,
+    });
+  } catch (error) {
+    console.error('Giveaway broadcast error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Internal error' });
   }
 });
 
