@@ -247,8 +247,8 @@ app.post('/api/launch-token/prepare', upload.single('image'), async (req, res) =
 // Broadcast a fully-signed transaction produced by the client (Privy)
 app.post('/api/launch-token/broadcast', async (req, res) => {
   try {
-    const { signedTxBase64, userId, mintAddress, poolAddress } = req.body;
-    const result = await broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress });
+    const { signedTxBase64, userId, mintAddress, poolAddress, metadataName, metadataSymbol, metadataUri, usedKeypairId } = req.body;
+    const result = await broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress, metadataName, metadataSymbol, metadataUri, usedKeypairId });
     const status = result.success ? 200 : 400;
     res.status(status).json(result);
   } catch (error) {
@@ -833,7 +833,7 @@ app.post('/api/admin/claim-creator-fees-once', async (req, res) => {
 // Giveaway: broadcast launch then send 0.01 SOL to creator from GIVEAWAY_WALLET
 app.post('/api/giveaway/launch-token/broadcast', async (req, res) => {
   try {
-    const { signedTxBase64, userId, mintAddress, poolAddress } = req.body || {};
+    const { signedTxBase64, userId, mintAddress, poolAddress, metadataName, metadataSymbol, metadataUri, usedKeypairId } = req.body || {};
     if (!signedTxBase64 || !userId || !poolAddress) {
       return res.status(400).json({ success: false, error: 'signedTxBase64, userId, and poolAddress are required' });
     }
@@ -844,7 +844,7 @@ app.post('/api/giveaway/launch-token/broadcast', async (req, res) => {
       return res.status(502).json({ success: false, error: e.message || 'Helius RPC unavailable' });
     }
     // 1) Broadcast the launch transaction using existing helper
-    const launch = await broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress });
+    const launch = await broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress, metadataName, metadataSymbol, metadataUri, usedKeypairId });
     if (!launch?.success && !launch?.transactionSignature) {
       return res.status(500).json({ success: false, error: launch?.error || 'Broadcast failed' });
     }

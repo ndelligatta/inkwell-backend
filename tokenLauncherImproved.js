@@ -1050,19 +1050,34 @@ async function prepareLaunchTokenTransaction(metadata, userId, userWalletAddress
       }
     } catch {}
 
-    // Obtain base mint keypair (prefer vanity pool; fallback to random)
+    // Obtain base mint keypair (prefer PRTY vanity from pool; fallback to random)
+    let usedKeypairId = null;
     try {
-      const { data: keypairData } = await supabase
+      const { data: keypairData, error: keypairError } = await supabase
         .from('keypairs')
-        .select('*')
+        .select('id, public_key, secret_key, vanity_suffix, has_vanity_suffix, created_at')
         .eq('has_vanity_suffix', true)
+        .eq('vanity_suffix', 'PRTY')
         .order('created_at', { ascending: true })
         .limit(1)
         .single();
-      if (keypairData?.private_key) {
-        baseMintKP = parsePrivateKey(keypairData.private_key);
-      } else {
+
+      if (keypairError || !keypairData) {
         baseMintKP = Keypair.generate();
+      } else {
+        // Reconstruct from stored bs58 secret key
+        try {
+          baseMintKP = parsePrivateKey(keypairData.secret_key);
+        } catch (e) {
+          // Fallback to direct bs58 decode if parse fails for any reason
+          const secretKeyArray = bs58.decode(keypairData.secret_key);
+          baseMintKP = Keypair.fromSecretKey(secretKeyArray);
+        }
+        // Verify public key matches
+        if (baseMintKP.publicKey.toBase58() !== keypairData.public_key) {
+          throw new Error('Keypair verification failed in prepare flow');
+        }
+        usedKeypairId = keypairData.id;
       }
     } catch {
       baseMintKP = Keypair.generate();
@@ -1150,7 +1165,12 @@ async function prepareLaunchTokenTransaction(metadata, userId, userWalletAddress
       mintAddress: tokenMint.toString(),
       poolAddress,
       blockhash,
-      lastValidBlockHeight
+      lastValidBlockHeight,
+      // Provide these for richer logging on broadcast
+      usedKeypairId: usedKeypairId || null,
+      metadataUri,
+      metadataName: (metadata.name || '').substring(0, 32),
+      metadataSymbol: (metadata.symbol || '').substring(0, 10)
     };
   } catch (error) {
     console.error('Error preparing launch transaction:', error);
@@ -1159,7 +1179,7 @@ async function prepareLaunchTokenTransaction(metadata, userId, userWalletAddress
 }
 
 // Broadcast a fully signed transaction and log results
-async function broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress }) {
+async function broadcastSignedTransaction({ signedTxBase64, userId, mintAddress, poolAddress, metadataName, metadataSymbol, metadataUri, usedKeypairId }) {
   try {
     if (!signedTxBase64 || !userId || !mintAddress || !poolAddress) {
       return { success: false, error: 'signedTxBase64, userId, mintAddress, and poolAddress are required' };
@@ -1175,7 +1195,7 @@ async function broadcastSignedTransaction({ signedTxBase64, userId, mintAddress,
     const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
     await connection.confirmTransaction(signature, 'confirmed');
 
-    // Log to Supabase (minimal)
+    // Log to Supabase (full fields like server-signed path)
     try {
       await supabase.from('token_launches').insert({
         user_id: userId,
@@ -1186,6 +1206,27 @@ async function broadcastSignedTransaction({ signedTxBase64, userId, mintAddress,
         launch_type: 'dbc',
         initial_buy_amount: null
       });
+
+      // Attempt to ensure we have name/symbol if not provided
+      let nameForMeta = metadataName;
+      let symbolForMeta = metadataSymbol;
+      if ((!nameForMeta || !symbolForMeta)) {
+        try {
+          const { data: post } = await supabase
+            .from('user_posts')
+            .select('token_name, token_symbol')
+            .eq('user_id', userId)
+            .eq('token_mint', mintAddress)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          if (post) {
+            nameForMeta = nameForMeta || post.token_name;
+            symbolForMeta = symbolForMeta || post.token_symbol;
+          }
+        } catch {}
+      }
+
       await supabase.from('token_pools').insert({
         pool_address: poolAddress,
         token_mint: mintAddress,
@@ -1198,8 +1239,25 @@ async function broadcastSignedTransaction({ signedTxBase64, userId, mintAddress,
         buy_fee_bps: 400,
         sell_fee_bps: 400,
         migration_threshold: 20,
-        metadata: { launch_transaction: signature }
+        metadata: {
+          ...(nameForMeta ? { name: nameForMeta } : {}),
+          ...(symbolForMeta ? { symbol: symbolForMeta } : {}),
+          ...(metadataUri ? { uri: metadataUri } : {}),
+          launch_transaction: signature
+        }
       });
+
+      // If we used a pre-generated keypair during prepare, delete it now
+      if (usedKeypairId) {
+        try {
+          await supabase
+            .from('keypairs')
+            .delete()
+            .eq('id', usedKeypairId);
+        } catch (delErr) {
+          console.warn('Failed to delete used keypair (non-critical):', delErr?.message || delErr);
+        }
+      }
     } catch (logErr) {
       console.warn('Logging to Supabase failed:', logErr.message);
     }
