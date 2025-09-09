@@ -28,15 +28,29 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY ? createClient(
   }
 ) : null;
 
-// Constants (use ONLY HELIUS_API_KEY from env; no fallbacks)
+// Constants
+// Align RPC usage with server.js: strict Helius-only connection with validation
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-if (!HELIUS_API_KEY) {
-  throw new Error('HELIUS_API_KEY missing');
-}
-const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
-const FALLBACK_RPC = null;
+const HELIUS_RPC = HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}` : null;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 2000; // 2 seconds
+
+// Create a Helius connection and verify it's responsive
+async function getHeliusConnectionOrThrow() {
+  if (!HELIUS_RPC) throw new Error('HELIUS_API_KEY not configured');
+  const connection = new Connection(HELIUS_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+  let lastErr;
+  for (let i = 0; i < 3; i++) {
+    try {
+      await connection.getLatestBlockhash('confirmed');
+      return connection;
+    } catch (e) {
+      lastErr = e;
+      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  throw new Error(`Helius RPC unavailable: ${lastErr?.message || lastErr}`);
+}
 
 // Check pool migration using official SDK
 async function checkPoolMigrationOfficial(poolAddress, connection) {
@@ -360,38 +374,16 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
     console.log('Pool:', poolAddress);
     console.log('User ID:', userId);
     
-    // Initialize connection with timeout config like platform fees
+    // Initialize Helius connection (single provider, validated)
     let connection;
     let dbcClient;
-    let connectionAttempt = 0;
-    let lastError;
-    
-    // Try primary RPC first, then fallback
-    const rpcUrls = [RPC_URL, FALLBACK_RPC];
-    
-    for (const rpcUrl of rpcUrls) {
-      try {
-        console.log(`Trying RPC: ${rpcUrl === RPC_URL ? 'Helius' : 'Fallback'} endpoint...`);
-        connection = new Connection(rpcUrl, {
-          commitment: 'confirmed',
-          confirmTransactionInitialTimeout: 60000,
-          httpHeaders: {
-            'solana-client': 'inkwell-creator'
-          }
-        });
-        
-        // Test connection with a simple call
-        await connection.getLatestBlockhash('confirmed');
-        dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
-        console.log('Connection established successfully');
-        break;
-      } catch (error) {
-        console.error(`Failed to connect to ${rpcUrl === RPC_URL ? 'Helius' : 'Fallback'} RPC:`, error.message);
-        lastError = error;
-        if (rpcUrl === FALLBACK_RPC) {
-          throw new Error(`All RPC endpoints failed: ${lastError.message}`);
-        }
-      }
+    try {
+      console.log('Trying RPC: Helius endpoint...');
+      connection = await getHeliusConnectionOrThrow();
+      dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+    } catch (error) {
+      console.error('Failed to connect to Helius RPC:', error.message);
+      throw error;
     }
     
     // Create keypair from creator private key (try base58 first, then base64)
@@ -814,28 +806,14 @@ async function checkAvailableCreatorFees(poolAddress) {
   try {
     console.log(`Checking fees for pool: ${poolAddress}`);
     
-    // Try primary RPC first, then fallback
+    // Helius-only connection
     let connection;
     let dbcClient;
-    const rpcUrls = [RPC_URL, FALLBACK_RPC];
-    
-    for (const rpcUrl of rpcUrls) {
-      try {
-        connection = new Connection(rpcUrl, {
-          commitment: 'confirmed',
-          httpHeaders: {
-            'solana-client': 'inkwell-creator'
-          }
-        });
-        await connection.getLatestBlockhash('confirmed');
-        dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
-        break;
-      } catch (error) {
-        console.error(`Failed to connect to RPC:`, error.message);
-        if (rpcUrl === FALLBACK_RPC) {
-          throw new Error('All RPC endpoints failed');
-        }
-      }
+    try {
+      connection = await getHeliusConnectionOrThrow();
+      dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+    } catch (error) {
+      return { success: false, error: error.message || 'Helius RPC unavailable' };
     }
     
     // Get fee metrics directly
