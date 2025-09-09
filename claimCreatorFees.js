@@ -864,7 +864,6 @@ async function checkAvailableCreatorFees(poolAddress) {
 }
 
 // Export functions
-<<<<<<< HEAD
 module.exports = {
   claimCreatorFees,
   claimAllCreatorFees,
@@ -874,10 +873,4 @@ module.exports = {
   checkPoolMigrationOfficial,
   getMigratedPoolAddress,
   broadcastSignedClaimTx
-=======
-module.exports = {
-  claimCreatorFees,
-  claimAllCreatorFees,
-  checkAvailableCreatorFees
->>>>>>> cc0b3ed (chore(claim): require HELIUS_API_KEY and use only Helius RPC in claimCreatorFees (no fallback, no hard-coded key))
 };
