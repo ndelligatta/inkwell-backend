@@ -12,6 +12,13 @@ const { CpAmm } = require('@meteora-ag/cp-amm-sdk');
 const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } = require('@solana/spl-token');
 const bs58 = require('bs58').default;
 const { createClient } = require('@supabase/supabase-js');
+// Prefer IPv4 to avoid IPv6 egress issues on some hosts
+try {
+  const dns = require('node:dns');
+  if (dns && typeof dns.setDefaultResultOrder === 'function') {
+    dns.setDefaultResultOrder('ipv4first');
+  }
+} catch (_) {}
 
 // Initialize Supabase client
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -32,6 +39,8 @@ const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY ? createClient(
 // Align RPC usage with server.js: strict Helius-only connection with validation
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_RPC = HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}` : null;
+const FALLBACK_RPC_URL = (process.env.FALLBACK_RPC_URL || '').trim();
+function isValidHttpUrl(u) { return /^https?:\/\//.test(u); }
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 2000; // 2 seconds
 
@@ -383,7 +392,21 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
       dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     } catch (error) {
       console.error('Failed to connect to Helius RPC:', error.message);
-      throw error;
+      // Optional, safe fallback if configured and valid
+      if (isValidHttpUrl(FALLBACK_RPC_URL)) {
+        try {
+          console.log('Trying RPC: Fallback endpoint...');
+          connection = new Connection(FALLBACK_RPC_URL, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+          await connection.getLatestBlockhash('confirmed');
+          dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+          console.log('Connected via fallback RPC');
+        } catch (fallbackErr) {
+          console.error('Failed to connect to Fallback RPC:', fallbackErr.message);
+          throw new Error(`All RPC endpoints failed: ${fallbackErr.message}`);
+        }
+      } else {
+        throw error;
+      }
     }
     
     // Create keypair from creator private key (try base58 first, then base64)
@@ -813,7 +836,17 @@ async function checkAvailableCreatorFees(poolAddress) {
       connection = await getHeliusConnectionOrThrow();
       dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
     } catch (error) {
-      return { success: false, error: error.message || 'Helius RPC unavailable' };
+      if (isValidHttpUrl(FALLBACK_RPC_URL)) {
+        try {
+          connection = new Connection(FALLBACK_RPC_URL, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+          await connection.getLatestBlockhash('confirmed');
+          dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
+        } catch (fallbackErr) {
+          return { success: false, error: `All RPC endpoints failed: ${fallbackErr.message}` };
+        }
+      } else {
+        return { success: false, error: error.message || 'Helius RPC unavailable' };
+      }
     }
     
     // Get fee metrics directly
