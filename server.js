@@ -10,6 +10,11 @@ console.log('PORT:', process.env.PORT || '3001');
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
+const ffmpegPath = require('ffmpeg-static');
+const ffmpeg = require('fluent-ffmpeg');
+if (ffmpegPath) {
+  ffmpeg.setFfmpegPath(ffmpegPath);
+}
 
 // Import AFTER dotenv is loaded
 const { 
@@ -128,6 +133,56 @@ app.use('/api/auth', authRoutes);
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Inkwell backend is running' });
+});
+
+// Convert a video to a small GIF (for token image)
+// Accepts either multipart upload (field name: 'video') or JSON body { videoUrl: string }
+app.post('/api/media/convert-gif', upload.single('video'), async (req, res) => {
+  try {
+    // Determine input source
+    let inputSource = null;
+    if (req.file && req.file.buffer) {
+      // Save buffer to a temporary file-like stream
+      const { Readable } = require('stream');
+      const stream = Readable.from(req.file.buffer);
+      inputSource = stream;
+    } else if (req.body && req.body.videoUrl) {
+      inputSource = req.body.videoUrl;
+    } else {
+      return res.status(400).json({ success: false, error: 'Provide a video file or videoUrl' });
+    }
+
+    // Configure ffmpeg pipeline
+    // - Take first ~4 seconds, scale to width 512px, preserve aspect, good palette
+    // - Output GIF to buffer
+    const { PassThrough } = require('stream');
+    const outputStream = new PassThrough();
+
+    const buffers = [];
+    outputStream.on('data', (chunk) => buffers.push(chunk));
+
+    await new Promise((resolve, reject) => {
+      let command = ffmpeg(inputSource)
+        .inputOptions(['-t 4'])
+        .noAudio()
+        .videoFilters([
+          'fps=12',
+          'scale=512:-1:flags=lanczos'
+        ])
+        .format('gif')
+        .on('error', (err) => reject(err))
+        .on('end', () => resolve(null));
+
+      command.pipe(outputStream, { end: true });
+    });
+
+    const gifBuffer = Buffer.concat(buffers);
+    const gifBase64 = gifBuffer.toString('base64');
+    return res.status(200).json({ success: true, gifBase64, gifMime: 'image/gif' });
+  } catch (error) {
+    console.error('Error converting video to GIF:', error);
+    return res.status(500).json({ success: false, error: error.message || 'Conversion failed' });
+  }
 });
 
 // Main token launch endpoint
