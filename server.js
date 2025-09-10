@@ -10,11 +10,10 @@ console.log('PORT:', process.env.PORT || '3001');
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const ffmpegPath = require('ffmpeg-static');
-const ffmpeg = require('fluent-ffmpeg');
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
-}
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
 
 // Import AFTER dotenv is loaded
 const { 
@@ -135,50 +134,137 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Inkwell backend is running' });
 });
 
-// Convert a video to a small GIF (for token image)
-// Accepts either multipart upload (field name: 'video') or JSON body { videoUrl: string }
-app.post('/api/media/convert-gif', upload.single('video'), async (req, res) => {
+// Convert a video URL to a small high-quality GIF using system ffmpeg with a palette (two-pass)
+app.post('/api/media/convert-gif', async (req, res) => {
+  const MAX_BYTES = 10 * 1024 * 1024; // 10MB
+  const TIMEOUT_MS = 20000; // 20s per ffmpeg step
+
+  const safeError = (code, msg) => res.status(code).json({ success: false, error: msg });
+
   try {
-    // Determine input source
-    let inputSource = null;
-    if (req.file && req.file.buffer) {
-      // Save buffer to a temporary file-like stream
-      const { Readable } = require('stream');
-      const stream = Readable.from(req.file.buffer);
-      inputSource = stream;
-    } else if (req.body && req.body.videoUrl) {
-      inputSource = req.body.videoUrl;
-    } else {
-      return res.status(400).json({ success: false, error: 'Provide a video file or videoUrl' });
+    const videoUrl = (req.body && req.body.videoUrl) ? String(req.body.videoUrl) : '';
+    if (!videoUrl) return safeError(400, 'videoUrl is required');
+    if (!videoUrl.startsWith('https://')) return safeError(400, 'Only https URLs are allowed');
+    try {
+      const u = new URL(videoUrl);
+      const host = u.hostname;
+      if (
+        host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
+        host.startsWith('169.254.')
+      ) {
+        return safeError(400, 'Disallowed host');
+      }
+    } catch (_) {
+      return safeError(400, 'Invalid URL');
     }
 
-    // Configure ffmpeg pipeline
-    // - Take first ~4 seconds, scale to width 512px, preserve aspect, good palette
-    // - Output GIF to buffer
-    const { PassThrough } = require('stream');
-    const outputStream = new PassThrough();
+    // HEAD check for content-type and length (best-effort)
+    try {
+      const head = await axios.head(videoUrl, { timeout: 8000, validateStatus: () => true });
+      const type = head.headers['content-type'] || '';
+      const len = parseInt(head.headers['content-length'] || '0', 10);
+      if (type && !type.startsWith('video/')) {
+        return safeError(400, 'URL is not a video');
+      }
+      if (len && len > MAX_BYTES) {
+        return safeError(400, 'Video is too large (max 10MB)');
+      }
+    } catch (e) {
+      // Ignore HEAD errors; continue and enforce during download
+    }
 
-    const buffers = [];
-    outputStream.on('data', (chunk) => buffers.push(chunk));
+    // Download to /tmp
+    const tmpIn = path.join('/tmp', `in-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`);
+    const tmpPalette = path.join('/tmp', `palette-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
+    const tmpOut = path.join('/tmp', `out-${Date.now()}-${Math.random().toString(36).slice(2)}.gif`);
+    const tmpPng = path.join('/tmp', `thumb-${Date.now()}-${Math.random().toString(36).slice(2)}.png`);
 
-    await new Promise((resolve, reject) => {
-      let command = ffmpeg(inputSource)
-        .inputOptions(['-t 4'])
-        .noAudio()
-        .videoFilters([
-          'fps=12',
-          'scale=512:-1:flags=lanczos'
-        ])
-        .format('gif')
-        .on('error', (err) => reject(err))
-        .on('end', () => resolve(null));
+    const cleanup = () => {
+      [tmpIn, tmpPalette, tmpOut, tmpPng].forEach((p) => {
+        try { fs.existsSync(p) && fs.unlinkSync(p); } catch (_) {}
+      });
+    };
 
-      command.pipe(outputStream, { end: true });
+    try {
+      const resp = await axios.get(videoUrl, { responseType: 'stream', timeout: 12000 });
+      const ws = fs.createWriteStream(tmpIn);
+      let downloaded = 0;
+      await new Promise((resolve, reject) => {
+        resp.data.on('data', (chunk) => {
+          downloaded += chunk.length;
+          if (downloaded > MAX_BYTES) {
+            resp.data.destroy();
+            ws.destroy();
+            reject(new Error('Video exceeds 10MB limit'));
+          }
+        });
+        resp.data.on('error', reject);
+        ws.on('error', reject);
+        ws.on('finish', resolve);
+        resp.data.pipe(ws);
+      });
+    } catch (e) {
+      cleanup();
+      return safeError(400, e.message || 'Failed to download video');
+    }
+
+    // Helper to run ffmpeg with timeout
+    const runFfmpeg = (args, timeoutMs) => new Promise((resolve, reject) => {
+      const child = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stderr = '';
+      child.stderr.on('data', (d) => { if (stderr.length < 100000) stderr += d.toString(); });
+      const to = setTimeout(() => { child.kill('SIGKILL'); }, timeoutMs);
+      child.on('error', (err) => { clearTimeout(to); reject(err); });
+      child.on('close', (code, signal) => {
+        clearTimeout(to);
+        if (code === 0) resolve({ code });
+        else reject(new Error(`ffmpeg failed: code=${code} signal=${signal} stderr=${stderr.slice(0,1500)}`));
+      });
     });
 
-    const gifBuffer = Buffer.concat(buffers);
-    const gifBase64 = gifBuffer.toString('base64');
-    return res.status(200).json({ success: true, gifBase64, gifMime: 'image/gif' });
+    try {
+      // Pass 1: palette generation
+      await runFfmpeg([
+        '-nostdin','-y','-threads','1','-t','4',
+        '-i', tmpIn,
+        '-vf', 'fps=12,scale=512:-1:flags=lanczos,palettegen=stats_mode=diff',
+        tmpPalette
+      ], TIMEOUT_MS);
+
+      // Pass 2: apply palette
+      await runFfmpeg([
+        '-nostdin','-y','-threads','1','-t','4',
+        '-i', tmpIn,
+        '-i', tmpPalette,
+        '-lavfi', 'fps=12,scale=512:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
+        tmpOut
+      ], TIMEOUT_MS);
+
+      const gifBuffer = fs.readFileSync(tmpOut);
+      const gifBase64 = gifBuffer.toString('base64');
+      cleanup();
+      return res.status(200).json({ success: true, gifBase64, gifMime: 'image/gif' });
+    } catch (e) {
+      console.error('GIF conversion failed, attempting PNG fallback:', e?.message || e);
+      try {
+        // Fallback: first-frame PNG thumbnail
+        await runFfmpeg([
+          '-nostdin','-y','-threads','1',
+          '-ss','0.5','-i', tmpIn,
+          '-vframes','1',
+          '-vf','scale=512:-1:flags=lanczos',
+          tmpPng
+        ], TIMEOUT_MS);
+        const pngBuffer = fs.readFileSync(tmpPng);
+        const pngBase64 = pngBuffer.toString('base64');
+        cleanup();
+        return res.status(200).json({ success: true, gifBase64: pngBase64, gifMime: 'image/png' });
+      } catch (e2) {
+        console.error('PNG fallback failed:', e2?.message || e2);
+        cleanup();
+        return safeError(500, 'Conversion failed');
+      }
+    }
   } catch (error) {
     console.error('Error converting video to GIF:', error);
     return res.status(500).json({ success: false, error: error.message || 'Conversion failed' });
