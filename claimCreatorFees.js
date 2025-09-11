@@ -68,7 +68,15 @@ async function getHeliusConnectionOrThrow() {
       await sleep(delay);
     }
   }
-  throw new Error(`Helius RPC unavailable: ${lastErr?.message || lastErr}`);
+  // If Helius failed after retries, attempt a public RPC fallback (or explicit env override)
+  const candidateFallback = isValidHttpUrl(FALLBACK_RPC_URL) ? FALLBACK_RPC_URL : 'https://api.mainnet-beta.solana.com';
+  try {
+    const fallbackConn = new Connection(candidateFallback, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
+    await retryGetLatestBlockhash(fallbackConn, 'confirmed');
+    return fallbackConn;
+  } catch (fallbackErr) {
+    throw new Error(`Helius RPC unavailable: ${lastErr?.message || lastErr}; Fallback RPC failed: ${fallbackErr?.message || fallbackErr}`);
+  }
 }
 
 // Retry wrapper for recent blockhash to avoid transient Helius hiccups
