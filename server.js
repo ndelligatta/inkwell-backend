@@ -14,6 +14,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const crypto = require('crypto');
 
 // Import AFTER dotenv is loaded
 const { 
@@ -129,6 +130,203 @@ const upload = multer({
 
 // Auth routes
 app.use('/api/auth', authRoutes);
+
+// ===================== TikTok OAuth + Status =====================
+const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY;
+const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET;
+const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI; // e.g., https://api.blockparty.fun/api/tiktok/auth/callback
+const TIKTOK_SCOPES = process.env.TIKTOK_SCOPES || 'user.info.basic,video.publish';
+const TIKTOK_AUTH_BASE = process.env.TIKTOK_AUTH_BASE || 'https://www.tiktok.com';
+const TIKTOK_API_BASE = process.env.TIKTOK_API_BASE || 'https://open.tiktokapis.com';
+const TIKTOK_STATE_SECRET = process.env.TIKTOK_STATE_SECRET || null;
+
+function hmacSign(payload) {
+  if (!TIKTOK_STATE_SECRET) return null;
+  return crypto.createHmac('sha256', TIKTOK_STATE_SECRET).update(payload).digest('hex');
+}
+
+function makeState(userId) {
+  const data = { userId, ts: Date.now(), nonce: crypto.randomBytes(8).toString('hex') };
+  const json = JSON.stringify(data);
+  const b64 = Buffer.from(json).toString('base64url');
+  const sig = hmacSign(b64);
+  return sig ? `${b64}.${sig}` : b64;
+}
+
+function parseAndVerifyState(state) {
+  try {
+    if (!state) return null;
+    if (!TIKTOK_STATE_SECRET) {
+      const json = Buffer.from(state, 'base64url').toString('utf8');
+      return JSON.parse(json);
+    }
+    const [b64, sig] = state.split('.')
+    if (!b64 || !sig) return null;
+    const expect = hmacSign(b64);
+    if (expect !== sig) return null;
+    const json = Buffer.from(b64, 'base64url').toString('utf8');
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function supabaseAdmin() {
+  const { createClient } = require('@supabase/supabase-js');
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+// Initiate TikTok OAuth
+app.get('/api/tiktok/auth/initiate', async (req, res) => {
+  try {
+    if (!TIKTOK_CLIENT_KEY || !TIKTOK_REDIRECT_URI) {
+      return res.status(500).json({ success: false, error: 'TikTok OAuth not configured' });
+    }
+    const userId = (req.query.userId || '').toString();
+    if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+    const state = makeState(userId);
+    const params = new URLSearchParams({
+      client_key: TIKTOK_CLIENT_KEY,
+      response_type: 'code',
+      scope: TIKTOK_SCOPES,
+      redirect_uri: TIKTOK_REDIRECT_URI,
+      state
+    });
+    const url = `${TIKTOK_AUTH_BASE}/v2/auth/authorize/?${params.toString()}`;
+    res.redirect(url);
+  } catch (err) {
+    console.error('TikTok initiate error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Internal error' });
+  }
+});
+
+// TikTok OAuth callback
+app.get('/api/tiktok/auth/callback', async (req, res) => {
+  try {
+    const code = (req.query.code || '').toString();
+    const state = (req.query.state || '').toString();
+    if (!code || !state) return res.status(400).send('Missing code/state');
+    const parsed = parseAndVerifyState(state);
+    if (!parsed || !parsed.userId) return res.status(400).send('Invalid state');
+    const userId = parsed.userId;
+
+    // Exchange code → access/refresh tokens
+    const tokenUrl = `${TIKTOK_API_BASE}/v2/oauth/token/`;
+    const body = {
+      client_key: TIKTOK_CLIENT_KEY,
+      client_secret: TIKTOK_CLIENT_SECRET,
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: TIKTOK_REDIRECT_URI
+    };
+    const tokResp = await axios.post(tokenUrl, body, { headers: { 'Content-Type': 'application/json' } });
+    const tok = tokResp.data || {};
+    if (!tok.access_token) {
+      console.error('TikTok token exchange failed:', tok);
+      return res.status(502).send('TikTok token exchange failed');
+    }
+    const accessToken = tok.access_token;
+    const refreshToken = tok.refresh_token || null;
+    const expiresIn = Number(tok.expires_in || 0);
+    const openId = tok.open_id || null;
+    const tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
+
+    // Fetch creator info (optional) for username/avatar
+    let username = null, avatarUrl = null;
+    try {
+      const infoResp = await axios.post(
+        `${TIKTOK_API_BASE}/v2/post/publish/creator_info/query/`,
+        {},
+        { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' } }
+      );
+      const info = infoResp.data || {};
+      if (info.data) {
+        username = info.data.creator_username || null;
+        avatarUrl = info.data.creator_avatar_url || null;
+      }
+    } catch (e) {
+      console.warn('creator_info query failed (non-fatal):', e?.response?.data || e?.message || e);
+    }
+
+    // Persist tokens + identity to users table
+    try {
+      const sb = supabaseAdmin();
+      const { error } = await sb
+        .from('users')
+        .update({
+          tiktok_open_id: openId,
+          tiktok_access_token: accessToken,
+          tiktok_refresh_token: refreshToken,
+          tiktok_token_expires_at: tokenExpiresAt,
+          tiktok_scopes: TIKTOK_SCOPES,
+          tiktok_username: username,
+          tiktok_avatar_url: avatarUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userId);
+      if (error) {
+        console.error('Supabase update error (TikTok):', error);
+        return res.status(500).send('Failed to save TikTok tokens');
+      }
+    } catch (dbErr) {
+      console.error('Supabase error (TikTok):', dbErr);
+      return res.status(500).send('Failed to save TikTok tokens');
+    }
+
+    const redirectBack = (process.env.FRONTEND_URL || 'https://blockparty.fun') + '/settings?connected=tiktok';
+    res.redirect(302, redirectBack);
+  } catch (err) {
+    console.error('TikTok callback error:', err?.response?.data || err?.message || err);
+    res.status(500).send('Internal error');
+  }
+});
+
+// Lightweight connection status for UI
+app.get('/api/tiktok/status', async (req, res) => {
+  try {
+    const userId = (req.query.userId || '').toString();
+    if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+    const sb = supabaseAdmin();
+    const { data, error } = await sb
+      .from('users')
+      .select('tiktok_open_id, tiktok_username, tiktok_avatar_url, tiktok_token_expires_at')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    const connected = !!(data && (data.tiktok_open_id || data.tiktok_token_expires_at || data.tiktok_username));
+    res.json({ success: true, connected, username: data?.tiktok_username || null, avatar_url: data?.tiktok_avatar_url || null });
+  } catch (err) {
+    console.error('TikTok status error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Internal error' });
+  }
+});
+
+// Disconnect and wipe TikTok tokens
+app.post('/api/tiktok/auth/disconnect', async (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    if (!userId) return res.status(400).json({ success: false, error: 'userId is required' });
+    const sb = supabaseAdmin();
+    const { error } = await sb
+      .from('users')
+      .update({
+        tiktok_open_id: null,
+        tiktok_access_token: null,
+        tiktok_refresh_token: null,
+        tiktok_token_expires_at: null,
+        tiktok_scopes: null,
+        tiktok_username: null,
+        tiktok_avatar_url: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('TikTok disconnect error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Internal error' });
+  }
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
