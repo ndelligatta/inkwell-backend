@@ -41,24 +41,49 @@ const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const HELIUS_RPC = HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}` : null;
 const FALLBACK_RPC_URL = (process.env.FALLBACK_RPC_URL || '').trim();
 function isValidHttpUrl(u) { return /^https?:\/\//.test(u); }
+// Generic retry settings (used for fee metrics, sends, etc.)
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 2000; // 2 seconds
+
+// Helius-specific retry configuration (single endpoint)
+// Allow overrides via env; defaults are conservative but higher than before
+const HELIUS_RETRY_ATTEMPTS = parseInt(process.env.HELIUS_RETRY_ATTEMPTS || '8', 10);
+const HELIUS_RETRY_DELAY_MS = parseInt(process.env.HELIUS_RETRY_DELAY_MS || '750', 10);
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 // Create a Helius connection and verify it's responsive
 async function getHeliusConnectionOrThrow() {
   if (!HELIUS_RPC) throw new Error('HELIUS_API_KEY not configured');
   const connection = new Connection(HELIUS_RPC, { commitment: 'confirmed', confirmTransactionInitialTimeout: 60000 });
   let lastErr;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < HELIUS_RETRY_ATTEMPTS; i++) {
     try {
       await connection.getLatestBlockhash('confirmed');
       return connection;
     } catch (e) {
       lastErr = e;
-      await new Promise(r => setTimeout(r, 500 * (i + 1)));
+      // Exponential-ish backoff
+      const delay = Math.min(HELIUS_RETRY_DELAY_MS * (i + 1), 5000);
+      await sleep(delay);
     }
   }
   throw new Error(`Helius RPC unavailable: ${lastErr?.message || lastErr}`);
+}
+
+// Retry wrapper for recent blockhash to avoid transient Helius hiccups
+async function retryGetLatestBlockhash(connection, commitment = 'confirmed') {
+  let lastErr;
+  for (let i = 0; i < HELIUS_RETRY_ATTEMPTS; i++) {
+    try {
+      return await connection.getLatestBlockhash(commitment);
+    } catch (e) {
+      lastErr = e;
+      const delay = Math.min(HELIUS_RETRY_DELAY_MS * (i + 1), 5000);
+      await sleep(delay);
+    }
+  }
+  throw new Error(`Helius RPC unavailable: failed to get recent blockhash: ${lastErr?.message || lastErr}`);
 }
 
 // Check pool migration using official SDK
@@ -243,7 +268,7 @@ async function claimAllDammV2Positions(migratedPoolAddress, creatorKeypair, conn
         
         // Sign and send
         claimTx.feePayer = creatorKeypair.publicKey;
-        const { blockhash } = await connection.getLatestBlockhash('confirmed');
+        const { blockhash } = await retryGetLatestBlockhash(connection, 'confirmed');
         claimTx.recentBlockhash = blockhash;
         
         const signature = await sendAndConfirmTransaction(
@@ -298,7 +323,7 @@ async function prepareCreatorClaimTxDBC({ connection, dbcClient, poolPubkey, use
     maxQuoteAmount: feeMetrics.current.creatorQuoteFee,
     payer: userWalletPubkey,
   });
-  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  const { blockhash } = await retryGetLatestBlockhash(connection, 'confirmed');
   claimTx.feePayer = userWalletPubkey;
   claimTx.recentBlockhash = blockhash;
   return claimTx;
@@ -332,7 +357,7 @@ async function prepareCreatorClaimTxDammV2({ connection, migratedPoolAddress, us
       tokenBProgram: getTokenProgram(poolState.tokenBFlag),
       feePayer: userWalletPubkey,
     });
-    const { blockhash } = await connection.getLatestBlockhash('confirmed');
+    const { blockhash } = await retryGetLatestBlockhash(connection, 'confirmed');
     claimTx.feePayer = userWalletPubkey;
     claimTx.recentBlockhash = blockhash;
     txs.push(claimTx);
@@ -588,7 +613,7 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
     // Sign and send transaction
     console.log('Signing transaction...');
     claimTx.feePayer = creatorKeypair.publicKey;
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    const { blockhash, lastValidBlockHeight } = await retryGetLatestBlockhash(connection, 'confirmed');
     claimTx.recentBlockhash = blockhash;
     claimTx.sign(creatorKeypair);
     
