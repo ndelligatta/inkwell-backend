@@ -212,16 +212,16 @@ app.get('/api/tiktok/auth/callback', async (req, res) => {
     if (!parsed || !parsed.userId) return res.status(400).send('Invalid state');
     const userId = parsed.userId;
 
-    // Exchange code → access/refresh tokens
+    // Exchange code → access/refresh tokens (TikTok requires x-www-form-urlencoded)
     const tokenUrl = `${TIKTOK_API_BASE}/v2/oauth/token/`;
-    const body = {
+    const form = new URLSearchParams({
       client_key: TIKTOK_CLIENT_KEY,
       client_secret: TIKTOK_CLIENT_SECRET,
       code,
       grant_type: 'authorization_code',
       redirect_uri: TIKTOK_REDIRECT_URI
-    };
-    const tokResp = await axios.post(tokenUrl, body, { headers: { 'Content-Type': 'application/json' } });
+    });
+    const tokResp = await axios.post(tokenUrl, form.toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
     const tok = tokResp.data || {};
     if (!tok.access_token) {
       console.error('TikTok token exchange failed:', tok);
