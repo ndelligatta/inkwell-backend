@@ -95,7 +95,8 @@ async function uploadMetadata(metadata, mintAddress) {
       external_url: metadata.website || undefined,
       attributes: [
         metadata.website && { trait_type: "website", value: metadata.website },
-        metadata.twitter && { trait_type: "twitter", value: metadata.twitter }
+        metadata.twitter && { trait_type: "twitter", value: metadata.twitter },
+        metadata.instagram && { trait_type: "instagram", value: metadata.instagram }
       ].filter(Boolean)
     };
 

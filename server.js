@@ -625,6 +625,7 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       description, 
       website, 
       twitter, 
+      instagram,
       initialBuyAmount,
       userId,
       userPrivateKey // Dev wallet private key
@@ -659,6 +660,7 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
       website: website?.trim() || undefined,
       // ALWAYS include twitter - use BlockParty as fallback
       twitter: twitter?.trim() || 'https://x.com/blockpartysol',
+      instagram: instagram?.trim() || undefined,
       initialBuyAmount: parseFloat(initialBuyAmount) || 0.01
     };
 
@@ -695,7 +697,7 @@ app.post('/api/launch-token', upload.single('image'), async (req, res) => {
 app.post('/api/launch-token/prepare', upload.single('image'), async (req, res) => {
   try {
     const { 
-      name, symbol, description, website, twitter, initialBuyAmount,
+      name, symbol, description, website, twitter, instagram, initialBuyAmount,
       userId, walletAddress
     } = req.body;
 
@@ -709,6 +711,7 @@ app.post('/api/launch-token/prepare', upload.single('image'), async (req, res) =
       description: description?.trim() || '',
       website: website?.trim() || undefined,
       twitter: twitter?.trim() || 'https://x.com/blockpartysol',
+      instagram: instagram?.trim() || undefined,
       initialBuyAmount: parseFloat(initialBuyAmount) || 0.01
     };
 

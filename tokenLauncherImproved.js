@@ -266,12 +266,20 @@ async function uploadMetadata(metadata, mintAddress) {
           value: metadata.twitter 
         });
       }
-      
+
       if (metadata.website) {
         socialLinks.website = metadata.website;
         metadataJson.attributes.push({ 
           trait_type: "website", 
           value: metadata.website 
+        });
+      }
+
+      if (metadata.instagram) {
+        socialLinks.instagram = metadata.instagram;
+        metadataJson.attributes.push({
+          trait_type: "instagram",
+          value: metadata.instagram
         });
       }
       
