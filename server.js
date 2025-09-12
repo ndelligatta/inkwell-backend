@@ -396,7 +396,8 @@ app.post('/api/tiktok/post-video', async (req, res) => {
 
     const postInfo = {
       title: String(title).slice(0, 2200),
-      privacy_level: privacy || 'PUBLIC_TO_EVERYONE',
+      // Sandbox/unaudited clients must post to private accounts
+      privacy_level: privacy || 'SELF_ONLY',
       disable_duet: false,
       disable_comment: false,
       disable_stitch: false,
@@ -434,7 +435,7 @@ app.post('/api/tiktok/post-video', async (req, res) => {
         if (head2.headers['content-type']) contentType = head2.headers['content-type'];
         head2.data.destroy?.(); // close stream
       } catch (e) {
-        return res.status(502).json({ success: false, error: 'Could not determine video size for upload' });
+        return res.status(200).json({ success: false, error: 'Could not determine video size for upload' });
       }
     }
 
@@ -450,7 +451,7 @@ app.post('/api/tiktok/post-video', async (req, res) => {
     const uploadUrl = initData?.data?.upload_url;
     const publishId = initData?.data?.publish_id;
     if (!uploadUrl || !publishId) {
-      return res.status(502).json({ success: false, error: 'TikTok FILE_UPLOAD init failed' });
+      return res.status(200).json({ success: false, error: 'TikTok FILE_UPLOAD init failed' });
     }
 
     // Stream upload from our videoUrl to TikTok upload_url
@@ -466,8 +467,10 @@ app.post('/api/tiktok/post-video', async (req, res) => {
 
     return res.json({ success: true, method: 'FILE_UPLOAD', publish_id: publishId });
   } catch (err) {
-    console.error('TikTok post-video error:', err?.response?.data || err?.message || err);
-    res.status(500).json({ success: false, error: err?.response?.data || err?.message || 'Internal error' });
+    const payload = err?.response?.data || { message: err?.message || 'Unknown error' };
+    console.error('TikTok post-video error:', payload);
+    // Do not surface 5xx to keep main app flow clean
+    res.status(200).json({ success: false, error: payload });
   }
 });
 
