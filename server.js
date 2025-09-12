@@ -132,7 +132,8 @@ const upload = multer({
 app.use('/api/auth', authRoutes);
 
 // ===================== TikTok OAuth + Status =====================
-const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY;
+// Hardcode Sandbox client key fallback for testing (env still takes precedence)
+const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY || 'sbaw5wpct4kow6cj4t';
 const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET;
 const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI; // e.g., https://api.blockparty.fun/api/tiktok/auth/callback
 // Hardcode scopes for simplicity
