@@ -135,7 +135,8 @@ app.use('/api/auth', authRoutes);
 const TIKTOK_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY;
 const TIKTOK_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET;
 const TIKTOK_REDIRECT_URI = process.env.TIKTOK_REDIRECT_URI; // e.g., https://api.blockparty.fun/api/tiktok/auth/callback
-const TIKTOK_SCOPES = process.env.TIKTOK_SCOPES || 'user.info.basic,video.publish';
+// Hardcode scopes for simplicity
+const TIKTOK_SCOPES = 'user.info.basic,video.publish';
 const TIKTOK_AUTH_BASE = process.env.TIKTOK_AUTH_BASE || 'https://www.tiktok.com';
 const TIKTOK_API_BASE = process.env.TIKTOK_API_BASE || 'https://open.tiktokapis.com';
 const TIKTOK_STATE_SECRET = process.env.TIKTOK_STATE_SECRET || null;
@@ -273,7 +274,7 @@ app.get('/api/tiktok/auth/callback', async (req, res) => {
       return res.status(500).send('Failed to save TikTok tokens');
     }
 
-    const redirectBack = (process.env.FRONTEND_URL || 'https://blockparty.fun') + '/settings?connected=tiktok';
+    const redirectBack = 'https://blockparty.fun/settings?connected=tiktok';
     res.redirect(302, redirectBack);
   } catch (err) {
     console.error('TikTok callback error:', err?.response?.data || err?.message || err);
