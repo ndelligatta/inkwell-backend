@@ -330,6 +330,147 @@ app.post('/api/tiktok/auth/disconnect', async (req, res) => {
   }
 });
 
+// Post a video to TikTok for a linked user (Direct Post with PULL_FROM_URL, fallback FILE_UPLOAD)
+app.post('/api/tiktok/post-video', async (req, res) => {
+  try {
+    const { userId, videoUrl, title, privacy, coverTsMs } = req.body || {};
+    if (!userId || !videoUrl || !title) {
+      return res.status(400).json({ success: false, error: 'userId, videoUrl, and title are required' });
+    }
+
+    const sb = supabaseAdmin();
+    // 1) Load TikTok tokens
+    const { data: user, error: uerr } = await sb
+      .from('users')
+      .select('tiktok_access_token, tiktok_refresh_token, tiktok_token_expires_at')
+      .eq('id', userId)
+      .maybeSingle();
+    if (uerr || !user || !user.tiktok_access_token) {
+      return res.status(400).json({ success: false, error: 'User does not have a linked TikTok account' });
+    }
+
+    let accessToken = user.tiktok_access_token;
+    let refreshToken = user.tiktok_refresh_token;
+    const expIso = user.tiktok_token_expires_at;
+    const expired = expIso ? Date.now() > new Date(expIso).getTime() - 60_000 : false;
+
+    // 2) Refresh if needed
+    if (expired && refreshToken) {
+      try {
+        const form = new URLSearchParams({
+          client_key: TIKTOK_CLIENT_KEY,
+          client_secret: TIKTOK_CLIENT_SECRET,
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+        });
+        const r = await axios.post(`${TIKTOK_API_BASE}/v2/oauth/token/`, form.toString(), {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+        const tok = r.data || {};
+        if (tok.access_token) {
+          accessToken = tok.access_token;
+          refreshToken = tok.refresh_token || refreshToken;
+          const expiresIn = Number(tok.expires_in || 0);
+          const newExp = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : expIso;
+          await sb.from('users').update({
+            tiktok_access_token: accessToken,
+            tiktok_refresh_token: refreshToken,
+            tiktok_token_expires_at: newExp,
+            updated_at: new Date().toISOString(),
+          }).eq('id', userId);
+        }
+      } catch (e) {
+        // If refresh fails, proceed with existing token (may still be valid) – do not block main flow
+        console.warn('TikTok token refresh failed:', e?.response?.data || e?.message || e);
+      }
+    }
+
+    // 3) Query creator info (optional but recommended)
+    try {
+      await axios.post(`${TIKTOK_API_BASE}/v2/post/publish/creator_info/query/`, {}, {
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' }
+      });
+    } catch (e) {
+      console.warn('creator_info query failed (non-fatal):', e?.response?.data || e?.message || e);
+    }
+
+    const postInfo = {
+      title: String(title).slice(0, 2200),
+      privacy_level: privacy || 'PUBLIC_TO_EVERYONE',
+      disable_duet: false,
+      disable_comment: false,
+      disable_stitch: false,
+      video_cover_timestamp_ms: Number.isFinite(coverTsMs) ? Number(coverTsMs) : 1000,
+    };
+
+    // 4) Try PULL_FROM_URL first
+    try {
+      const initResp = await axios.post(`${TIKTOK_API_BASE}/v2/post/publish/video/init/`, {
+        post_info: postInfo,
+        source_info: { source: 'PULL_FROM_URL', video_url: videoUrl }
+      }, {
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' }
+      });
+      const init = initResp.data || {};
+      if (init?.data?.publish_id) {
+        return res.json({ success: true, method: 'PULL_FROM_URL', publish_id: init.data.publish_id });
+      }
+    } catch (e) {
+      console.warn('PULL_FROM_URL failed, will try FILE_UPLOAD:', e?.response?.data || e?.message || e);
+    }
+
+    // 5) FILE_UPLOAD fallback
+    let size = 0;
+    let contentType = 'video/mp4';
+    try {
+      const head = await axios.head(videoUrl);
+      if (head.headers['content-length']) size = parseInt(head.headers['content-length'], 10) || 0;
+      if (head.headers['content-type']) contentType = head.headers['content-type'];
+    } catch {}
+    if (!size) {
+      try {
+        const head2 = await axios.get(videoUrl, { responseType: 'stream' });
+        if (head2.headers['content-length']) size = parseInt(head2.headers['content-length'], 10) || 0;
+        if (head2.headers['content-type']) contentType = head2.headers['content-type'];
+        head2.data.destroy?.(); // close stream
+      } catch (e) {
+        return res.status(502).json({ success: false, error: 'Could not determine video size for upload' });
+      }
+    }
+
+    const chunkSize = size; // single-chunk upload
+    const totalChunks = 1;
+    const initFile = await axios.post(`${TIKTOK_API_BASE}/v2/post/publish/video/init/`, {
+      post_info: postInfo,
+      source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunkSize, total_chunk_count: totalChunks }
+    }, {
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' }
+    });
+    const initData = initFile.data || {};
+    const uploadUrl = initData?.data?.upload_url;
+    const publishId = initData?.data?.publish_id;
+    if (!uploadUrl || !publishId) {
+      return res.status(502).json({ success: false, error: 'TikTok FILE_UPLOAD init failed' });
+    }
+
+    // Stream upload from our videoUrl to TikTok upload_url
+    const src = await axios.get(videoUrl, { responseType: 'stream' });
+    await axios.put(uploadUrl, src.data, {
+      headers: {
+        'Content-Range': `bytes 0-${size - 1}/${size}`,
+        'Content-Type': contentType || 'video/mp4'
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    });
+
+    return res.json({ success: true, method: 'FILE_UPLOAD', publish_id: publishId });
+  } catch (err) {
+    console.error('TikTok post-video error:', err?.response?.data || err?.message || err);
+    res.status(500).json({ success: false, error: err?.response?.data || err?.message || 'Internal error' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Inkwell backend is running' });
