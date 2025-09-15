@@ -19,6 +19,15 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
     persistSession: false,
     autoRefreshToken: false
+  },
+  db: {
+    schema: 'public'
+  },
+  // Force schema refresh
+  global: {
+    headers: {
+      'x-refresh-schema': 'true'
+    }
   }
 });
 
@@ -98,8 +107,8 @@ async function updateUserProfileToken(userId, tokenData) {
         profile_token_mint: tokenData.mintAddress,
         profile_token_pool: tokenData.poolAddress,
         profile_token_launched_at: new Date().toISOString(),
-        profile_token_tx_signature: tokenData.transactionSignature,
-        user_token_MK: 4200.00 // Default market cap of $4.2k
+        profile_token_tx_signature: tokenData.transactionSignature
+        // user_token_MK: 4200.00 // Temporarily disabled until schema cache updates
       })
       .eq('id', userId);
     
