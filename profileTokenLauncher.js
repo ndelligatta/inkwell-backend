@@ -137,7 +137,7 @@ async function launchProfileToken(userId) {
     // Prepare metadata
     const metadata = {
       name: user.screen_name,
-      symbol: '$PARTY',
+      symbol: 'PARTY',
       description: `Profile token for ${user.screen_name} on BlockParty. Join the party at https://blockparty.fun/profile/${user.wallet_address}`,
       website: `https://blockparty.fun/profile/${user.wallet_address}`,
       twitter: 'https://x.com/blockpartysol',
