@@ -98,7 +98,8 @@ async function updateUserProfileToken(userId, tokenData) {
         profile_token_mint: tokenData.mintAddress,
         profile_token_pool: tokenData.poolAddress,
         profile_token_launched_at: new Date().toISOString(),
-        profile_token_tx_signature: tokenData.transactionSignature
+        profile_token_tx_signature: tokenData.transactionSignature,
+        user_token_MK: 4200.00 // Default market cap of $4.2k
       })
       .eq('id', userId);
     
