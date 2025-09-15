@@ -1661,6 +1661,53 @@ app.listen(PORT, () => {
   //     console.error('[STARTUP] Initial lifetime fee sync error:', error);
   //   }
   // }, 10000);
+
+// Profile Token Launch Endpoint
+const { launchProfileToken } = require('./profileTokenLauncher');
+
+app.post('/api/launch-profile-token', async (req, res) => {
+  try {
+    console.log('=== PROFILE TOKEN LAUNCH ===');
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required'
+      });
+    }
+    
+    console.log(`Launching profile token for user: ${userId}`);
+    
+    // Check if profile token wallet is configured
+    if (!process.env.PROFILE_TOKEN_WALLET_PRIVATE_KEY) {
+      console.error('PROFILE_TOKEN_WALLET_PRIVATE_KEY not configured');
+      return res.status(500).json({
+        success: false,
+        error: 'Profile token system not configured'
+      });
+    }
+    
+    // Launch the profile token
+    const result = await launchProfileToken(userId);
+    
+    if (result.success) {
+      console.log('Profile token launched successfully');
+      res.status(200).json(result);
+    } else {
+      console.error('Profile token launch failed:', result.error);
+      res.status(400).json(result);
+    }
+    
+  } catch (error) {
+    console.error('Error in /api/launch-profile-token:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 });
 
 module.exports = app;
