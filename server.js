@@ -1688,9 +1688,50 @@ app.post('/api/launch-profile-token', async (req, res) => {
       });
     }
     
-    // Launch the profile token
+    // Optional SSE mode for UI progress signals without changing callers by default.
+    // Enable by sending Accept: text/event-stream or query ?sse=1
+    const wantsSSE = req.query.sse === '1' || /text\/event-stream/.test(String(req.headers.accept || ''));
+    if (wantsSSE) {
+      // Set up Server-Sent Events stream
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      // CORS echo
+      if (req.headers.origin) res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+      res.flushHeaders && res.flushHeaders();
+
+      const send = (event, dataObj) => {
+        const data = JSON.stringify(dataObj);
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${data}\n\n`);
+      };
+
+      // Notify client overlay to open
+      send('overlay', { state: 'open', message: 'Launching your profile token!' });
+
+      try {
+        const result = await launchProfileToken(userId);
+        if (result.success) {
+          console.log('Profile token launched successfully');
+          // Notify success and ask client to close overlay
+          send('overlay', { state: 'close', success: true, result });
+          res.end();
+        } else {
+          console.error('Profile token launch failed:', result.error);
+          send('overlay', { state: 'close', success: false, error: result.error });
+          res.end();
+        }
+      } catch (err) {
+        console.error('SSE flow error in /api/launch-profile-token:', err);
+        send('overlay', { state: 'close', success: false, error: err?.message || 'Internal error' });
+        res.end();
+      }
+      return; // Do not continue to JSON flow
+    }
+
+    // Default JSON flow
     const result = await launchProfileToken(userId);
-    
+
     if (result.success) {
       console.log('Profile token launched successfully');
       res.status(200).json(result);
