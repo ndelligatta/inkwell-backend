@@ -1665,6 +1665,55 @@ app.listen(PORT, () => {
 // Profile Token Launch Endpoint
 const { launchProfileToken } = require('./profileTokenLauncher');
 
+// GET variant to support Server-Sent Events (SSE) progress without breaking POST JSON callers.
+app.get('/api/launch-profile-token', async (req, res) => {
+  try {
+    const userId = (req.query.userId || '').toString();
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'userId is required' });
+    }
+
+    if (!process.env.PROFILE_TOKEN_WALLET_PRIVATE_KEY) {
+      return res.status(500).json({ success: false, error: 'Profile token system not configured' });
+    }
+
+    const wantsSSE = req.query.sse === '1' || /text\/event-stream/.test(String(req.headers.accept || ''));
+    if (!wantsSSE) {
+      return res.status(400).json({ success: false, error: 'For GET, use ?sse=1 and Accept: text/event-stream' });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    if (req.headers.origin) res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+    res.flushHeaders && res.flushHeaders();
+
+    const send = (event, dataObj) => {
+      const data = JSON.stringify(dataObj);
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${data}\n\n`);
+    };
+
+    send('overlay', { state: 'open', message: 'Launching your profile token!' });
+    try {
+      const result = await launchProfileToken(userId);
+      if (result.success) {
+        send('overlay', { state: 'close', success: true, result });
+      } else {
+        send('overlay', { state: 'close', success: false, error: result.error });
+      }
+    } catch (err) {
+      send('overlay', { state: 'close', success: false, error: err?.message || 'Internal error' });
+    }
+    res.end();
+  } catch (error) {
+    console.error('Error in GET /api/launch-profile-token:', error);
+    try {
+      res.end();
+    } catch {}
+  }
+});
+
 app.post('/api/launch-profile-token', async (req, res) => {
   try {
     console.log('=== PROFILE TOKEN LAUNCH ===');
