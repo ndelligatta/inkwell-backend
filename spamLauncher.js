@@ -24,55 +24,22 @@ async function getConnection() {
   return conn;
 }
 
+const { uploadMetadataReplica } = require('./metadataUploaderReplica');
+
 async function uploadImageAndMetadataForMint(mintAddress, imageBase64) {
-  // No fallbacks: require client-provided base64 image
   if (!imageBase64 || typeof imageBase64 !== 'string') {
     throw new Error('imageBase64 is required');
   }
-  const axios = require('axios');
-  let imageUrl;
-  const imageBuffer = Buffer.from(imageBase64, 'base64');
-  const imagePath = `posts/token-${mintAddress}.png`;
-  const { error: imgErr } = await supabase.storage
-    .from('post-media')
-    .upload(imagePath, imageBuffer, { cacheControl: '3600', upsert: true, contentType: 'image/png' });
-  if (imgErr) throw imgErr;
-  const { data: imgUrlData } = supabase.storage.from('post-media').getPublicUrl(imagePath);
-  imageUrl = imgUrlData.publicUrl;
-  // Preflight HEAD check to ensure availability and correct content-type
-  const headRespImg = await axios.head(imageUrl, { timeout: 10000, validateStatus: () => true });
-  if (headRespImg.status !== 200 || String(headRespImg.headers['content-type'] || '').indexOf('image/png') === -1) {
-    throw new Error(`Image not available after upload: ${imageUrl} (${headRespImg.status})`);
-  }
-
-  const mintPlaceholder = 'SPAM';
-  const metaJson = {
+  const replicaMeta = {
     name: 'Block Party',
     symbol: 'PARTY',
     description: 'Block Party — Join the party at https://blockparty.fun',
-    image: imageUrl,
-    attributes: [
-      { trait_type: 'twitter', value: 'https://x.com/blockpartysol' },
-      { trait_type: 'website', value: 'https://blockparty.fun' }
-    ],
-    properties: { files: [{ uri: imageUrl, type: 'image/png' }], category: 'image', creators: [] },
-    external_url: 'https://blockparty.fun',
-    extensions: { twitter: 'https://x.com/blockpartysol', website: 'https://blockparty.fun' }
+    website: 'https://blockparty.fun',
+    twitter: 'https://x.com/blockpartysol',
+    image: Buffer.from(imageBase64, 'base64'),
+    imageType: 'image/png'
   };
-  const metaPath = `posts/token-metadata-${mintAddress}.json`;
-  const metaBuffer = Buffer.from(JSON.stringify(metaJson, null, 2));
-  const { error: metaErr } = await supabase.storage
-    .from('post-media')
-    .upload(metaPath, metaBuffer, { cacheControl: '3600', upsert: true, contentType: 'application/json' });
-  if (metaErr) throw metaErr;
-  const { data: metaUrlData } = supabase.storage.from('post-media').getPublicUrl(metaPath);
-  const metadataUrl = metaUrlData.publicUrl;
-  // Preflight HEAD check for metadata JSON
-  const headRespMeta = await axios.head(metadataUrl, { timeout: 10000, validateStatus: () => true });
-  if (headRespMeta.status !== 200 || String(headRespMeta.headers['content-type'] || '').indexOf('application/json') === -1) {
-    throw new Error(`Metadata not available after upload: ${metadataUrl} (${headRespMeta.status})`);
-  }
-  return metadataUrl;
+  return await uploadMetadataReplica(replicaMeta, mintAddress);
 }
 
 async function launchSpamToken({ imageBase64, imageMime }) {
@@ -96,7 +63,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
     const tokenMintKP = Keypair.generate();
     const mintAddress = tokenMintKP.publicKey.toBase58();
     // Upload metadata (image + json) with mint-specific filenames (mirrors main flow)
-    const metadataUri = await uploadImageAndMetadataForMint(mintAddress, imageBase64);
+    const { metadataUrl, imageUrl } = await uploadImageAndMetadataForMint(mintAddress, imageBase64);
 
     // Create pool + first buy in the same transaction
     const configPk = new PublicKey(configStr);
@@ -110,7 +77,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
           config: configPk,
           name: 'Block Party',
           symbol: 'PARTY',
-          uri: metadataUri,
+          uri: metadataUrl,
           payer: signer.publicKey,
           poolCreator: signer.publicKey,
         },
@@ -129,7 +96,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
         config: configPk,
         name: 'Block Party',
         symbol: 'PARTY',
-        uri: metadataUri,
+          uri: metadataUrl,
         payer: signer.publicKey,
         poolCreator: signer.publicKey,
       });
@@ -151,7 +118,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
 
     // Derive pool address deterministically (avoid race with on-chain query)
     const poolAddress = deriveDbcPoolAddress(NATIVE_MINT, new PublicKey(mintAddress), configPk).toString();
-    return { success: true, mintAddress, poolAddress, transactionSignature: sig, solscanUrl: `https://solscan.io/tx/${sig}` };
+    return { success: true, mintAddress, poolAddress, transactionSignature: sig, solscanUrl: `https://solscan.io/tx/${sig}`, metadataUrl, imageUrl };
   } catch (error) {
     return { success: false, error: error?.message || 'Failed to launch spam token' };
   }

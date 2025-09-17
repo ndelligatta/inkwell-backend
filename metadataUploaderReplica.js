@@ -3,6 +3,7 @@
 // without importing from it, so we don't risk changing the working file.
 
 const { createClient } = require('@supabase/supabase-js');
+const axios = require('axios');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -58,6 +59,11 @@ async function uploadMetadataReplica(metadata, mintAddress) {
       .from('post-media')
       .getPublicUrl(filePath);
     imageUrl = urlData.publicUrl;
+    // Validate image URL is reachable and has correct content-type
+    const headImg = await axios.head(imageUrl, { timeout: 10000, validateStatus: () => true });
+    if (headImg.status !== 200 || String(headImg.headers['content-type'] || '').indexOf('image') === -1) {
+      throw new Error(`Image URL not ready or wrong content-type: ${imageUrl} (${headImg.status})`);
+    }
   }
 
   // Step 2: build metadata JSON (exact shape used by working flow)
@@ -101,9 +107,25 @@ async function uploadMetadataReplica(metadata, mintAddress) {
   const { data: metadataUrlData } = supabase.storage
     .from('post-media')
     .getPublicUrl(metadataPath);
+  const metadataUrl = metadataUrlData.publicUrl;
+  // Validate metadata URL is reachable and JSON
+  const headMeta = await axios.head(metadataUrl, { timeout: 10000, validateStatus: () => true });
+  if (headMeta.status !== 200 || String(headMeta.headers['content-type'] || '').indexOf('application/json') === -1) {
+    throw new Error(`Metadata URL not ready or wrong content-type: ${metadataUrl} (${headMeta.status})`);
+  }
 
-  return metadataUrlData.publicUrl;
+  // Optionally parse JSON for shape assertions
+  try {
+    const getMeta = await axios.get(metadataUrl, { timeout: 10000 });
+    const meta = getMeta.data || {};
+    if (!meta.image || (meta.properties && Array.isArray(meta.properties.files) && meta.properties.files.length > 0 && !meta.properties.files[0].type)) {
+      throw new Error('Metadata JSON missing image or file type');
+    }
+  } catch (e) {
+    throw new Error(`Metadata JSON fetch/validate failed: ${e?.message || e}`);
+  }
+
+  return { metadataUrl, imageUrl };
 }
 
 module.exports = { uploadMetadataReplica };
-
