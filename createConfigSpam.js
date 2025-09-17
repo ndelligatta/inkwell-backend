@@ -4,8 +4,17 @@ const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve
 const BN = require('bn.js');
 const bs58 = require('bs58').default;
 
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "726140d8-6b0d-4719-8702-682d81e94a37";
-const RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+// Prefer IPv4 resolution to avoid IPv6 egress issues
+try {
+  const dns = require('node:dns');
+  if (dns && typeof dns.setDefaultResultOrder === 'function') {
+    dns.setDefaultResultOrder('ipv4first');
+  }
+} catch (_) {}
+
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY || "";
+const HELIUS_RPC = HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}` : null;
+const PUBLIC_RPC = 'https://api.mainnet-beta.solana.com';
 const NATIVE_SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 
 // Hard-coded admin private key (as requested)
@@ -14,7 +23,16 @@ const HARDCODED_ADMIN_PRIVATE_KEY = 'WkQJdhvq6bJkuWH4HY6YaC9uHMQrHUR5SuS2jRRJBcp
 async function createInkwellConfigSpam() {
   try {
     console.log('====== CREATING INKWELL CONFIG (SPAM VARIANT) ======');
-    const connection = new Connection(RPC_URL, 'confirmed');
+    // Build connection with fallback if Helius is unavailable
+    let connection = new Connection(HELIUS_RPC || PUBLIC_RPC, 'confirmed');
+    try {
+      await connection.getLatestBlockhash('confirmed');
+    } catch (e) {
+      console.warn('Primary RPC failed, falling back to public RPC:', e?.message || e);
+      connection = new Connection(PUBLIC_RPC, 'confirmed');
+      // Probe fallback too
+      await connection.getLatestBlockhash('confirmed');
+    }
     const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
 
     // Use hard-coded admin keypair
@@ -102,4 +120,3 @@ async function createInkwellConfigSpam() {
 }
 
 module.exports = { createInkwellConfigSpam };
-
