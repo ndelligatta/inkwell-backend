@@ -56,7 +56,10 @@ async function createInkwellConfigSpam() {
       { sqrtPrice: new BN("13043817825332782"), liquidity: new BN("2425988008058820449100000000000000") }
     ];
 
-    // Reduced migration threshold to 0.01 SOL
+    // Reduced migration threshold to 0.01 SOL (10,000,000 lamports)
+    const MIGRATION_QUOTE_THRESHOLD_LAMPORTS = new BN(10_000_000);
+    const START_SQRT_PRICE = new BN("3141367320245630");
+
     const configParams = {
       poolFees: {
         baseFee: {
@@ -73,12 +76,12 @@ async function createInkwellConfigSpam() {
       activationType: 0,
       tokenType: 0,
       tokenDecimal: 9,
-      migrationQuoteThreshold: new BN(0.01 * LAMPORTS_PER_SOL), // 0.01 SOL
+      migrationQuoteThreshold: MIGRATION_QUOTE_THRESHOLD_LAMPORTS, // 0.01 SOL
       partnerLpPercentage: 0,
       partnerLockedLpPercentage: 50,
       creatorLpPercentage: 0,
       creatorLockedLpPercentage: 50,
-      sqrtStartPrice: new BN("3141367320245630"),
+      sqrtStartPrice: START_SQRT_PRICE,
       lockedVesting: { amountPerPeriod: new BN(0), cliffDurationFromMigrationTime: new BN(0), frequency: new BN(0), numberOfPeriod: new BN(0), cliffUnlockAmount: new BN(0) },
       migrationFeeOption: 6,
       tokenSupply: { preMigrationTokenSupply: new BN("1000000000000000000"), postMigrationTokenSupply: new BN("1000000000000000000") },
