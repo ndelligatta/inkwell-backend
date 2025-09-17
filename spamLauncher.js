@@ -23,7 +23,7 @@ async function getConnection() {
   return conn;
 }
 
-async function uploadImageAndMetadata() {
+async function uploadImageAndMetadataForMint(mintAddress) {
   // Always use the canonical Supabase image URL, re-uploading to ensure fresh path
   const SOURCE_IMAGE_URL = 'https://hfuqgtkurdgdctnrhnmw.supabase.co/storage/v1/object/public/post-media/posts/spam/spam-token-image-1758109834799.png';
   let imageUrl;
@@ -31,7 +31,7 @@ async function uploadImageAndMetadata() {
     const axios = require('axios');
     const resp = await axios.get(SOURCE_IMAGE_URL, { responseType: 'arraybuffer', timeout: 20000 });
     const imageBuffer = Buffer.from(resp.data);
-    const imagePath = `posts/spam/spam-token-image-${Date.now()}.png`;
+    const imagePath = `posts/token-${mintAddress}.png`;
     const { error: imgErr } = await supabase.storage
       .from('post-media')
       .upload(imagePath, imageBuffer, { cacheControl: '3600', upsert: true, contentType: 'image/png' });
@@ -58,7 +58,7 @@ async function uploadImageAndMetadata() {
     external_url: 'https://blockparty.fun',
     extensions: { twitter: 'https://x.com/blockpartysol', website: 'https://blockparty.fun' }
   };
-  const metaPath = `posts/token-metadata-spam-${Date.now()}.json`;
+  const metaPath = `posts/token-metadata-${mintAddress}.json`;
   const { error: metaErr } = await supabase.storage.from('post-media').upload(metaPath, Buffer.from(JSON.stringify(metaJson, null, 2)), { cacheControl: '3600', upsert: true, contentType: 'application/json' });
   if (metaErr) throw metaErr;
   const { data: metaUrlData } = supabase.storage.from('post-media').getPublicUrl(metaPath);
@@ -72,17 +72,8 @@ async function launchSpamToken({ imageBase64, imageMime }) {
   // 1) SPAM_CONFIG_PUBKEY (preferred)
   // 2) DBC_CONFIG_PUBKEY (default app config)
   // 3) Signer public key (as instructed)
-  let configStr = (process.env.SPAM_CONFIG_PUBKEY || process.env.DBC_CONFIG_PUBKEY || '').trim();
-  let useSignerAsConfig = false;
-  if (!configStr) {
-    try {
-      const signerTmp = Keypair.fromSecretKey(bs58.decode(profilePriv));
-      configStr = signerTmp.publicKey.toBase58();
-      useSignerAsConfig = true;
-    } catch (e) {
-      return { success: false, error: 'SPAM_CONFIG_PUBKEY not configured and failed to derive from profile wallet' };
-    }
-  }
+  // Strictly use the provided hard-coded config (0.01 SOL threshold)
+  const configStr = '4F6aakNcNqMgxmdG5eVpQmmUPYCHVdaXx9YLBrcbYjdR';
 
   try {
     const connection = await getConnection();
@@ -91,19 +82,21 @@ async function launchSpamToken({ imageBase64, imageMime }) {
     // Signer is the profile token wallet
     const signer = Keypair.fromSecretKey(bs58.decode(profilePriv));
 
-    // Upload metadata
-    const metadataUri = await uploadImageAndMetadata();
+    // Prepare mint first for deterministic storage paths
+    const tokenMintKP = Keypair.generate();
+    const mintAddress = tokenMintKP.publicKey.toBase58();
+    // Upload metadata (image + json) with mint-specific filenames (mirrors main flow)
+    const metadataUri = await uploadImageAndMetadataForMint(mintAddress);
 
     // Create pool + first buy in the same transaction
     const configPk = new PublicKey(configStr);
     console.log('[spam-launch] Using config:', configPk.toBase58(), useSignerAsConfig ? '(derived from signer pubkey)' : '');
-    const tokenMintKP = Keypair.generate();
     let poolInstructions = [];
     let buyInstructions = [];
     try {
       const { createPoolTx, swapBuyTx } = await dbcClient.pool.createPoolWithFirstBuy({
         createPoolParam: {
-          baseMint: tokenMintKP.publicKey,
+          baseMint: new PublicKey(mintAddress),
           config: configPk,
           name: 'Block Party',
           symbol: 'PARTY',
@@ -122,7 +115,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
       if (swapBuyTx) buyInstructions = swapBuyTx.instructions;
     } catch (e) {
       const createPoolTx = await dbcClient.pool.createPool({
-        baseMint: tokenMintKP.publicKey,
+        baseMint: new PublicKey(mintAddress),
         config: configPk,
         name: 'Block Party',
         symbol: 'PARTY',
@@ -146,8 +139,8 @@ async function launchSpamToken({ imageBase64, imageMime }) {
     const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
     await connection.confirmTransaction(sig, 'confirmed');
 
-    const poolAddress = (await dbcClient.state.getPoolByBaseMint(tokenMintKP.publicKey)).pool.toString();
-    return { success: true, mintAddress: tokenMintKP.publicKey.toBase58(), poolAddress, transactionSignature: sig, solscanUrl: `https://solscan.io/tx/${sig}` };
+    const poolAddress = (await dbcClient.state.getPoolByBaseMint(new PublicKey(mintAddress))).pool.toString();
+    return { success: true, mintAddress, poolAddress, transactionSignature: sig, solscanUrl: `https://solscan.io/tx/${sig}` };
   } catch (error) {
     return { success: false, error: error?.message || 'Failed to launch spam token' };
   }
