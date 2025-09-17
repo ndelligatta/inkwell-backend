@@ -63,10 +63,23 @@ async function uploadImageAndMetadata(imageBase64, imageMime) {
 }
 
 async function launchSpamToken({ imageBase64, imageMime }) {
-  const configStr = (process.env.SPAM_CONFIG_PUBKEY || '').trim();
   const profilePriv = (process.env.PROFILE_TOKEN_WALLET_PRIVATE_KEY || '').trim();
-  if (!configStr) return { success: false, error: 'SPAM_CONFIG_PUBKEY not configured' };
   if (!profilePriv) return { success: false, error: 'PROFILE_TOKEN_WALLET_PRIVATE_KEY not configured' };
+  // Config selection with safe fallbacks:
+  // 1) SPAM_CONFIG_PUBKEY (preferred)
+  // 2) DBC_CONFIG_PUBKEY (default app config)
+  // 3) Signer public key (as instructed)
+  let configStr = (process.env.SPAM_CONFIG_PUBKEY || process.env.DBC_CONFIG_PUBKEY || '').trim();
+  let useSignerAsConfig = false;
+  if (!configStr) {
+    try {
+      const signerTmp = Keypair.fromSecretKey(bs58.decode(profilePriv));
+      configStr = signerTmp.publicKey.toBase58();
+      useSignerAsConfig = true;
+    } catch (e) {
+      return { success: false, error: 'SPAM_CONFIG_PUBKEY not configured and failed to derive from profile wallet' };
+    }
+  }
 
   try {
     const connection = await getConnection();
@@ -80,6 +93,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
 
     // Create pool with first buy (0.01 SOL)
     const configPk = new PublicKey(configStr);
+    console.log('[spam-launch] Using config:', configPk.toBase58(), useSignerAsConfig ? '(derived from signer pubkey)' : '');
     const tokenMintKP = Keypair.generate();
     const createPoolTx = await dbcClient.pool.createPool({
       baseMint: tokenMintKP.publicKey,
@@ -138,4 +152,3 @@ async function launchSpamToken({ imageBase64, imageMime }) {
 }
 
 module.exports = { launchSpamToken };
-
