@@ -23,22 +23,25 @@ async function getConnection() {
   return conn;
 }
 
-async function uploadImageAndMetadata(imageBase64, imageMime) {
-  // Upload image if provided
+async function uploadImageAndMetadata() {
+  // Always use the canonical Supabase image URL, re-uploading to ensure fresh path
+  const SOURCE_IMAGE_URL = 'https://hfuqgtkurdgdctnrhnmw.supabase.co/storage/v1/object/public/post-media/posts/spam/spam-token-image-1758109834799.png';
   let imageUrl;
-  if (imageBase64) {
-    const imageBuffer = Buffer.from(imageBase64, 'base64');
-    const ext = imageMime && imageMime.includes('png') ? 'png' : 'jpg';
-    const imagePath = `posts/spam/spam-token-image-${Date.now()}.${ext}`;
-    const { error: imgErr } = await supabase.storage.from('post-media').upload(imagePath, imageBuffer, { cacheControl: '3600', upsert: true, contentType: imageMime || 'image/png' });
+  try {
+    const axios = require('axios');
+    const resp = await axios.get(SOURCE_IMAGE_URL, { responseType: 'arraybuffer', timeout: 20000 });
+    const imageBuffer = Buffer.from(resp.data);
+    const imagePath = `posts/spam/spam-token-image-${Date.now()}.png`;
+    const { error: imgErr } = await supabase.storage
+      .from('post-media')
+      .upload(imagePath, imageBuffer, { cacheControl: '3600', upsert: true, contentType: 'image/png' });
     if (!imgErr) {
       const { data } = supabase.storage.from('post-media').getPublicUrl(imagePath);
       imageUrl = data.publicUrl;
     }
-  }
-  if (!imageUrl) {
-    // Fallback to hosted asset if client didn't send image
-    imageUrl = 'https://blockparty.fun/spam-bp.png';
+  } catch (e) {
+    // As a last resort, use the source URL directly
+    imageUrl = SOURCE_IMAGE_URL;
   }
 
   const mintPlaceholder = 'SPAM';
@@ -51,7 +54,7 @@ async function uploadImageAndMetadata(imageBase64, imageMime) {
       { trait_type: 'twitter', value: 'https://x.com/blockpartysol' },
       { trait_type: 'website', value: 'https://blockparty.fun' }
     ],
-    properties: { files: [{ uri: imageUrl, type: imageMime || 'image/png' }], category: 'image', creators: [] },
+    properties: { files: [{ uri: imageUrl, type: 'image/png' }], category: 'image', creators: [] },
     external_url: 'https://blockparty.fun',
     extensions: { twitter: 'https://x.com/blockpartysol', website: 'https://blockparty.fun' }
   };
@@ -89,63 +92,62 @@ async function launchSpamToken({ imageBase64, imageMime }) {
     const signer = Keypair.fromSecretKey(bs58.decode(profilePriv));
 
     // Upload metadata
-    const metadataUri = await uploadImageAndMetadata(imageBase64, imageMime);
+    const metadataUri = await uploadImageAndMetadata();
 
-    // Create pool with first buy (0.01 SOL)
+    // Create pool + first buy in the same transaction
     const configPk = new PublicKey(configStr);
     console.log('[spam-launch] Using config:', configPk.toBase58(), useSignerAsConfig ? '(derived from signer pubkey)' : '');
     const tokenMintKP = Keypair.generate();
-    const createPoolTx = await dbcClient.pool.createPool({
-      baseMint: tokenMintKP.publicKey,
-      config: configPk,
-      name: 'Block Party',
-      symbol: 'PARTY',
-      uri: metadataUri,
-      payer: signer.publicKey,
-      poolCreator: signer.publicKey,
-    });
+    let poolInstructions = [];
+    let buyInstructions = [];
+    try {
+      const { createPoolTx, swapBuyTx } = await dbcClient.pool.createPoolWithFirstBuy({
+        createPoolParam: {
+          baseMint: tokenMintKP.publicKey,
+          config: configPk,
+          name: 'Block Party',
+          symbol: 'PARTY',
+          uri: metadataUri,
+          payer: signer.publicKey,
+          poolCreator: signer.publicKey,
+        },
+        firstBuyParam: {
+          buyer: signer.publicKey,
+          buyAmount: new BN(Math.floor(0.01 * 1e9)),
+          minimumAmountOut: new BN(1),
+          referralTokenAccount: null,
+        },
+      });
+      poolInstructions = createPoolTx.instructions;
+      if (swapBuyTx) buyInstructions = swapBuyTx.instructions;
+    } catch (e) {
+      const createPoolTx = await dbcClient.pool.createPool({
+        baseMint: tokenMintKP.publicKey,
+        config: configPk,
+        name: 'Block Party',
+        symbol: 'PARTY',
+        uri: metadataUri,
+        payer: signer.publicKey,
+        poolCreator: signer.publicKey,
+      });
+      poolInstructions = createPoolTx.instructions;
+    }
 
-    // Add priority + pool instructions
     const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500000 });
     const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 800000 });
     const tx = new Transaction();
     tx.add(priorityFeeIx);
     tx.add(computeLimitIx);
-    tx.add(...createPoolTx.instructions);
+    tx.add(...poolInstructions);
+    if (buyInstructions.length > 0) tx.add(...buyInstructions);
     tx.feePayer = signer.publicKey;
     tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
     tx.sign(tokenMintKP, signer);
-    const sig1 = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
-    await connection.confirmTransaction(sig1, 'confirmed');
+    const sig = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+    await connection.confirmTransaction(sig, 'confirmed');
 
-    // Swap buy 0.01 SOL
     const poolAddress = (await dbcClient.state.getPoolByBaseMint(tokenMintKP.publicKey)).pool.toString();
-    const buyTx = await dbcClient.pool.swap({
-      owner: signer.publicKey,
-      pool: new PublicKey(poolAddress),
-      amountIn: new BN(Math.floor(0.01 * 1e9)),
-      minimumAmountOut: new BN(0),
-      swapBaseForQuote: false,
-      referralTokenAccount: null,
-      payer: signer.publicKey
-    });
-    const buyPriority = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 200000 });
-    const buyLimit = ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 });
-    const btx = new Transaction();
-    btx.add(buyPriority); btx.add(buyLimit); btx.add(...buyTx.instructions);
-    btx.feePayer = signer.publicKey;
-    btx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
-    btx.sign(signer);
-    const sig2 = await connection.sendRawTransaction(btx.serialize(), { skipPreflight: false, maxRetries: 3 });
-    await connection.confirmTransaction(sig2, 'confirmed');
-
-    return {
-      success: true,
-      mintAddress: tokenMintKP.publicKey.toBase58(),
-      poolAddress,
-      transactionSignature: sig2,
-      solscanUrl: `https://solscan.io/tx/${sig2}`
-    };
+    return { success: true, mintAddress: tokenMintKP.publicKey.toBase58(), poolAddress, transactionSignature: sig, solscanUrl: `https://solscan.io/tx/${sig}` };
   } catch (error) {
     return { success: false, error: error?.message || 'Failed to launch spam token' };
   }
