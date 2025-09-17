@@ -26,6 +26,7 @@ const {
 } = require('./tokenLauncherImproved');
 const { createInkwellConfig } = require('./createConfig');
 const { createInkwellConfigSpam } = require('./createConfigSpam');
+const { launchSpamToken } = require('./spamLauncher');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { 
   claimCreatorFees, 
@@ -1728,6 +1729,23 @@ app.post('/api/create-config-spam', async (req, res) => {
     return res.status(500).json(result);
   } catch (error) {
     console.error('ERROR IN CONFIG SPAM ENDPOINT:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Internal server error' });
+  }
+});
+
+// Launch a promo token (Spam the Party) using profile wallet and SPAM config
+app.post('/api/spam-launch', async (req, res) => {
+  try {
+    // Optional feature flag
+    if (process.env.SPAM_PROMO_ENABLED === 'false') {
+      return res.status(403).json({ success: false, error: 'Promo disabled' });
+    }
+    const { imageBase64, imageMime } = req.body || {};
+    const result = await launchSpamToken({ imageBase64, imageMime });
+    if (result.success) return res.status(200).json(result);
+    return res.status(400).json(result);
+  } catch (error) {
+    console.error('Error in /api/spam-launch:', error);
     res.status(500).json({ success: false, error: error?.message || 'Internal server error' });
   }
 });
