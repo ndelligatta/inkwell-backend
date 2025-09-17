@@ -23,14 +23,19 @@ async function getConnection() {
   return conn;
 }
 
-async function uploadImageAndMetadataForMint(mintAddress) {
-  // Always use the canonical Supabase image URL, re-uploading to ensure fresh path
+async function uploadImageAndMetadataForMint(mintAddress, imageBase64) {
+  // Prefer client-provided base64 (Spam the Party button), else fetch canonical PNG
   const SOURCE_IMAGE_URL = 'https://hfuqgtkurdgdctnrhnmw.supabase.co/storage/v1/object/public/post-media/posts/spam/spam-token-image-1758109834799.png';
   let imageUrl;
   try {
-    const axios = require('axios');
-    const resp = await axios.get(SOURCE_IMAGE_URL, { responseType: 'arraybuffer', timeout: 20000 });
-    const imageBuffer = Buffer.from(resp.data);
+    let imageBuffer;
+    if (imageBase64 && typeof imageBase64 === 'string') {
+      imageBuffer = Buffer.from(imageBase64, 'base64');
+    } else {
+      const axios = require('axios');
+      const resp = await axios.get(SOURCE_IMAGE_URL, { responseType: 'arraybuffer', timeout: 20000 });
+      imageBuffer = Buffer.from(resp.data);
+    }
     const imagePath = `posts/token-${mintAddress}.png`;
     const { error: imgErr } = await supabase.storage
       .from('post-media')
@@ -86,7 +91,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
     const tokenMintKP = Keypair.generate();
     const mintAddress = tokenMintKP.publicKey.toBase58();
     // Upload metadata (image + json) with mint-specific filenames (mirrors main flow)
-    const metadataUri = await uploadImageAndMetadataForMint(mintAddress);
+    const metadataUri = await uploadImageAndMetadataForMint(mintAddress, imageBase64);
 
     // Create pool + first buy in the same transaction
     const configPk = new PublicKey(configStr);
