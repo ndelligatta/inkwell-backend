@@ -3,7 +3,6 @@ const { DynamicBondingCurveClient, deriveDbcPoolAddress } = require('@meteora-ag
 const BN = require('bn.js');
 const bs58 = require('bs58').default;
 const { createClient } = require('@supabase/supabase-js');
-const { getSpamTokenImageBase64 } = require('./assets/spamTokenImage');
 
 // Prefer IPv4 first
 try { const dns = require('node:dns'); dns.setDefaultResultOrder && dns.setDefaultResultOrder('ipv4first'); } catch {}
@@ -25,12 +24,14 @@ async function getConnection() {
   return conn;
 }
 
-async function uploadImageAndMetadataForMint(mintAddress) {
-  // No fallbacks: always use embedded base64 from environment.
+async function uploadImageAndMetadataForMint(mintAddress, imageBase64) {
+  // No fallbacks: require client-provided base64 image
+  if (!imageBase64 || typeof imageBase64 !== 'string') {
+    throw new Error('imageBase64 is required');
+  }
   const axios = require('axios');
   let imageUrl;
-  // Build image buffer from embedded base64
-  const imageBuffer = Buffer.from(getSpamTokenImageBase64(), 'base64');
+  const imageBuffer = Buffer.from(imageBase64, 'base64');
   const imagePath = `posts/token-${mintAddress}.png`;
   const { error: imgErr } = await supabase.storage
     .from('post-media')
@@ -95,7 +96,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
     const tokenMintKP = Keypair.generate();
     const mintAddress = tokenMintKP.publicKey.toBase58();
     // Upload metadata (image + json) with mint-specific filenames (mirrors main flow)
-    const metadataUri = await uploadImageAndMetadataForMint(mintAddress);
+    const metadataUri = await uploadImageAndMetadataForMint(mintAddress, imageBase64);
 
     // Create pool + first buy in the same transaction
     const configPk = new PublicKey(configStr);
