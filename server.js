@@ -25,6 +25,7 @@ const {
   broadcastSignedTransaction
 } = require('./tokenLauncherImproved');
 const { createInkwellConfig } = require('./createConfig');
+const { createInkwellConfigSpam } = require('./createConfigSpam');
 const { claimPoolFees, getPoolFeeMetrics } = require('./claimPlatformFees');
 const { 
   claimCreatorFees, 
@@ -1711,6 +1712,23 @@ app.get('/api/launch-profile-token', async (req, res) => {
     try {
       res.end();
     } catch {}
+  }
+});
+
+// Create new DBC config (SPAM variant) - reduced migration threshold + hard-coded key
+app.post('/api/create-config-spam', async (req, res) => {
+  try {
+    console.log('====== CREATE CONFIG SPAM ENDPOINT ======');
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${process.env.ADMIN_AUTH_TOKEN || 'admin-secret'}`) {
+      return res.status(401).json({ success: false, error: 'Unauthorized. Admin authentication required.' });
+    }
+    const result = await createInkwellConfigSpam();
+    if (result.success) return res.status(200).json(result);
+    return res.status(500).json(result);
+  } catch (error) {
+    console.error('ERROR IN CONFIG SPAM ENDPOINT:', error);
+    res.status(500).json({ success: false, error: error?.message || 'Internal server error' });
   }
 });
 
