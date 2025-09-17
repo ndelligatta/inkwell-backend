@@ -90,7 +90,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
 
     // Create pool + first buy in the same transaction
     const configPk = new PublicKey(configStr);
-    console.log('[spam-launch] Using config:', configPk.toBase58(), useSignerAsConfig ? '(derived from signer pubkey)' : '');
+    console.log('[spam-launch] Using config:', configPk.toBase58());
     let poolInstructions = [];
     let buyInstructions = [];
     try {
