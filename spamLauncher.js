@@ -73,7 +73,7 @@ async function launchSpamToken({ imageBase64, imageMime }) {
   // 2) DBC_CONFIG_PUBKEY (default app config)
   // 3) Signer public key (as instructed)
   // Strictly use the provided hard-coded config (0.01 SOL threshold)
-  const configStr = '4F6aakNcNqMgxmdG5eVpQmmUPYCHVdaXx9YLBrcbYjdR';
+  const configStr = 'FBGD1Jq887Z2KPSiG88mUpRBKLHhYFm7vihXjB3TuBYf';
 
   try {
     const connection = await getConnection();
