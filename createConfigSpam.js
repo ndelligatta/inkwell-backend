@@ -17,8 +17,8 @@ const HELIUS_RPC = HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${H
 const PUBLIC_RPC = 'https://api.mainnet-beta.solana.com';
 const NATIVE_SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 
-// Hard-coded admin private key (as requested)
-const HARDCODED_ADMIN_PRIVATE_KEY = 'WkQJdhvq6bJkuWH4HY6YaC9uHMQrHUR5SuS2jRRJBcpu76LNp3LjUPWVtbeCgjHtHGcDZRPCHQzePa6DnUeUab9';
+// Admin private key provided via environment (Railway): spam_unlock (preferred) or SPAM_UNLOCK
+const SPAM_UNLOCK = (process.env.spam_unlock || process.env.SPAM_UNLOCK || '').trim();
 
 async function createInkwellConfigSpam() {
   try {
@@ -35,8 +35,11 @@ async function createInkwellConfigSpam() {
     }
     const dbcClient = new DynamicBondingCurveClient(connection, 'confirmed');
 
-    // Use hard-coded admin keypair
-    const adminKeypair = Keypair.fromSecretKey(bs58.decode(HARDCODED_ADMIN_PRIVATE_KEY));
+    // Use admin keypair from environment variable
+    if (!SPAM_UNLOCK) {
+      throw new Error('Missing spam_unlock (SPAM_UNLOCK) environment variable');
+    }
+    const adminKeypair = Keypair.fromSecretKey(bs58.decode(SPAM_UNLOCK));
     console.log('Admin wallet (spam):', adminKeypair.publicKey.toString());
 
     const balance = await connection.getBalance(adminKeypair.publicKey);
