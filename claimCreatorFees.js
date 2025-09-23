@@ -143,9 +143,20 @@ async function getMigratedPoolAddress(poolAddress, connection, dammVersion) {
       // For known migrated pools, use hardcoded mint addresses
       // This is temporary until we can decode migration metadata
       const knownMigratedPools = {
+        // Example mapping left in place
         'FwRuQKaoJdqcE4JXpfav9xR4a4XnPvdBCr3NrZNP1ELF': {
           baseMint: new PublicKey('FbCk2TgjKkSR3F63C2SuBtKvN7bLdYCz5tHFGDFPPRtY'),
           quoteMint: new PublicKey('So11111111111111111111111111111111111111112') // SOL
+        },
+        // Niger (NER) — explicit override provided by admin
+        'DgHY3CD7ToPn7FwQVcdrG6N1Yt2q68fUadW3hFHbscJy': {
+          baseMint: new PublicKey('C8MiEhXVyEcxG4FfHAw6SXaw7NqjT5rpgbTARf6qprtY'),
+          quoteMint: new PublicKey('So11111111111111111111111111111111111111112')
+        },
+        // Additional token provided (pool discovered via base mint lookup)
+        'DWXt5DZZ6Pxy11kzXjv8w8hLBtDvM2pu1YpQLjr1YHHN': {
+          baseMint: new PublicKey('5vAFzRHqojT5drWvFzfDhjqGTVkbpprZKvxjRKxoPrty'),
+          quoteMint: new PublicKey('So11111111111111111111111111111111111111112')
         }
       };
       
