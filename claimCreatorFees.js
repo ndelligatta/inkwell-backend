@@ -590,8 +590,46 @@ async function claimCreatorFees(poolAddress, creatorPrivateKey, userId) {
           };
         }
       }
-      
-      // Pool hasn't migrated and no fees available
+
+      // Fallback: attempt to derive a DAMM v2 migrated pool even if official metadata not found
+      try {
+        console.log('Attempting fallback v2 derivation for migrated pool...');
+        const derivedV2Pool = await getMigratedPoolAddress(poolAddress, connection, 'v2');
+        if (derivedV2Pool) {
+          console.log('Derived migrated v2 pool:', derivedV2Pool.toString());
+          const claimResult = await claimAllDammV2Positions(derivedV2Pool.toString(), creatorKeypair, connection);
+
+          if (claimResult.success) {
+            return {
+              success: true,
+              migrated: true,
+              originalPool: poolAddress,
+              newPoolAddress: derivedV2Pool.toString(),
+              dammVersion: 'v2',
+              positionsClaimed: claimResult.positionsClaimed,
+              totalPositions: claimResult.totalPositions,
+              results: claimResult.results,
+              message: `Successfully claimed ${claimResult.positionsClaimed} of ${claimResult.totalPositions} positions from derived DAMM v2 pool`
+            };
+          } else {
+            return {
+              success: false,
+              error: claimResult.error || 'Failed to claim from derived DAMM v2 pool',
+              migrated: true,
+              originalPool: poolAddress,
+              newPoolAddress: derivedV2Pool.toString(),
+              dammVersion: 'v2',
+              positionsClaimed: claimResult.positionsClaimed || 0,
+              totalPositions: claimResult.totalPositions || 0,
+              message: claimResult.error
+            };
+          }
+        }
+      } catch (derivationError) {
+        console.warn('Fallback derivation failed:', derivationError?.message || derivationError);
+      }
+
+      // Pool hasn't migrated (or could not be derived) and no fees available
       return {
         success: false,
         error: 'No creator fees available to claim',
