@@ -176,7 +176,7 @@ async function createInkwellConfig() {
         fee: '4% PRE AND POST MIGRATION (2% creator, 2% platform)',
         tokenSupply: 'EXACTLY 1,000,000,000 tokens',
         decimals: 9,
-        migrationThreshold: '20 SOL',
+        migrationThreshold: '40 SOL',
         migrationFeeOption: 'CUSTOMIZABLE (6) - KEEPS 4% FEES AFTER MIGRATION!',
         curveType: 'Bags exact curve (guaranteed 1B tokens)'
       }
