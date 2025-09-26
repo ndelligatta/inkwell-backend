@@ -76,7 +76,7 @@ async function createInkwellConfig() {
       activationType: 0, // Slot-based activation like Bags
       tokenType: 0, // SPL Token
       tokenDecimal: 9, // 9 decimals CRITICAL for 1B tokens
-      migrationQuoteThreshold: new BN(40 * LAMPORTS_PER_SOL), // 40 SOL threshold
+      migrationQuoteThreshold: new BN(20 * LAMPORTS_PER_SOL), // 20 SOL threshold
       partnerLpPercentage: 0, // u16
       partnerLockedLpPercentage: 50, // 50% to platform
       creatorLpPercentage: 0, // u16
